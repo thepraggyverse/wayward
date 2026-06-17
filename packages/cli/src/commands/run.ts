@@ -2,7 +2,7 @@ import { FileRunStore } from "@thepraggyverse/core";
 import type { PermissionMode } from "@thepraggyverse/core";
 import { WorkflowRuntime } from "@thepraggyverse/workflow-runtime";
 import { getWorkflow } from "@thepraggyverse/workflows";
-import { resolve } from "node:path";
+import { invocationCwd, resolveFromInvocationCwd } from "./paths.js";
 import { renderRunDetail } from "./run-rendering.js";
 
 export async function runCommand(args: string[], store = new FileRunStore()): Promise<string> {
@@ -32,7 +32,7 @@ export async function runShowCommand(args: string[], store = new FileRunStore())
 }
 
 function parseRunOptions(args: string[]): { repo: string; attempts?: number; baseRef?: string; prompt?: string; mode?: PermissionMode } {
-  let repo = process.cwd();
+  let repo = invocationCwd();
   let attempts: number | undefined;
   let baseRef: string | undefined;
   let prompt: string | undefined;
@@ -42,7 +42,7 @@ function parseRunOptions(args: string[]): { repo: string; attempts?: number; bas
     if (arg === "--repo") {
       const value = args[++index];
       if (!value) throw new Error("Usage: wayward run <workflow> --repo <path>");
-      repo = resolve(value);
+      repo = resolveFromInvocationCwd(value);
       continue;
     }
     if (arg === "--attempts" || arg === "--attempt-count") {

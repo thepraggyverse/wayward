@@ -25,6 +25,27 @@ pnpm --filter @thepraggyverse/cli wayward run ultrareview --repo .
 
 Wayward writes durable run state under `.wayward/runs/` and worktrees under `.wayward/worktrees/`.
 
+## Codex Plugin And MCP
+
+The Codex plugin descriptor lives at `plugins/codex/plugin.json`. It exposes thin skills for:
+
+- `ultrareview`
+- `open-pr-audit`
+- `tournament`
+- `checkpoint-rewind-branch`
+- `run-inspection`
+- `security-review` as a security-focused route to `ultrareview`
+
+The plugin starts the local MCP server with:
+
+```bash
+pnpm --filter @thepraggyverse/mcp-server start
+```
+
+MCP clients can call `createRun`, `listRuns`, `readRun`, `readReport`, `listPendingApprovals`, `decideApproval`, `listCheckpoints`, `createCheckpoint`, `rewind`, and `branchFromCheckpoint`.
+
+Wayward is local-first: run records, reports, artifacts, checkpoints, and worktrees stay under the local repository's `.wayward/` directory. Built-in workflows do not perform external mutations without a recorded approval gate decision. See `docs/codex-integration.md` for the full install and safety notes.
+
 ## Contributing
 
 This repository is intentionally monorepo-first while public contracts settle. Keep package boundaries narrow, keep workflow outputs structured, and preserve raw worker artifacts whenever a synthesized report depends on them.

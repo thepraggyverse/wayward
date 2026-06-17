@@ -7,3 +7,5 @@ Checkpoint creation snapshots repository files while excluding Wayward's local `
 Before rewinding dirty code state, Wayward creates a safety checkpoint named `pre-rewind to <checkpoint-id>`. Untracked files are moved to `.wayward/rewind-quarantine/<run-id>/<checkpoint-id>/` before the checkpoint tree is restored.
 
 Branching from a checkpoint creates a git worktree under `.wayward/worktrees/<run-id>/` and records the path in the run so `wayward board` can show it.
+
+MCP clients should use `listCheckpoints`, `createCheckpoint`, `rewind`, and `branchFromCheckpoint` for the same behavior. These tools call the shared checkpoint and worktree services; clients should not construct refs, reset trees, or create Wayward worktree paths themselves.

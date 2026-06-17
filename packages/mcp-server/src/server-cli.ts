@@ -1,4 +1,4 @@
-import { createWaywardMcpTools } from "./server.js";
+import { WaywardMcpUserError, callWaywardMcpTool, createWaywardMcpTools, getWaywardMcpToolDefinitions, toMcpError } from "./server.js";
 
 const tools = createWaywardMcpTools();
 process.stdin.setEncoding("utf8");
@@ -12,39 +12,41 @@ process.stdin.on("data", (chunk) => {
 });
 
 async function handleMessage(line: string): Promise<void> {
-  const message = JSON.parse(line) as { id?: string | number; method?: string; params?: Record<string, unknown> };
-  if (!message.id) return;
+  let message: { id?: string | number; method?: string; params?: Record<string, unknown> };
+  try {
+    message = JSON.parse(line) as { id?: string | number; method?: string; params?: Record<string, unknown> };
+  } catch (error) {
+    respondError(null, -32700, toMcpError(error).message);
+    return;
+  }
+  if (message.id === undefined || message.id === null) return;
   try {
     if (message.method === "initialize") {
       respond(message.id, { protocolVersion: "2024-11-05", serverInfo: { name: "wayward", version: "0.1.0" }, capabilities: { tools: {} } });
       return;
     }
     if (message.method === "tools/list") {
-      respond(message.id, {
-        tools: Object.keys(tools).map((name) => ({
-          name,
-          description: `Wayward ${name} tool`,
-          inputSchema: { type: "object", additionalProperties: true }
-        }))
-      });
+      respond(message.id, { tools: getWaywardMcpToolDefinitions() });
       return;
     }
     if (message.method === "tools/call") {
-      const params = message.params as { name: keyof typeof tools; arguments?: Record<string, unknown> };
-      const result = await tools[params.name](params.arguments as never);
+      const params = message.params as { name?: unknown; arguments?: Record<string, unknown> };
+      if (typeof params?.name !== "string") throw new WaywardMcpUserError("tools/call requires params.name.");
+      const result = await callWaywardMcpTool(tools, params.name, params.arguments);
       respond(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       return;
     }
     respondError(message.id, -32601, `Unknown method ${message.method}`);
   } catch (error) {
-    respondError(message.id, -32000, error instanceof Error ? error.message : String(error));
+    const payload = toMcpError(error);
+    respondError(message.id, payload.code, payload.message);
   }
 }
 
-function respond(id: string | number, result: unknown): void {
+function respond(id: string | number | null, result: unknown): void {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
 }
 
-function respondError(id: string | number, code: number, message: string): void {
+function respondError(id: string | number | null, code: number, message: string): void {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } })}\n`);
 }

@@ -7,7 +7,7 @@ import type { AgentJob, ApprovalDecision, ArtifactRef, CheckpointRecord, CreateR
 export class FileRunStore {
   private readonly locks = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly rootDir = ".wayward/runs") {}
+  constructor(private readonly rootDir = defaultRunRoot()) {}
 
   async createRun(input: CreateRunInput): Promise<RunSummary> {
     const now = new Date().toISOString();
@@ -209,4 +209,8 @@ export class FileRunStore {
       if (this.locks.get(runId) === tail) this.locks.delete(runId);
     }
   }
+}
+
+function defaultRunRoot(): string {
+  return process.env.WAYWARD_RUNS_DIR ?? join(process.env.INIT_CWD ?? process.cwd(), ".wayward", "runs");
 }

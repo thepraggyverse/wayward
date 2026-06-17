@@ -1,5 +1,6 @@
-import { FileRunStore, createId } from "@thepraggyverse/core";
-import { RealGitClient, RunWorktreeService, type GitClient } from "@thepraggyverse/git-worktrees";
+import { FileRunStore } from "@thepraggyverse/core";
+import { RealGitClient, RunBranchService, type GitClient } from "@thepraggyverse/git-worktrees";
+import { invocationCwd } from "./paths.js";
 
 interface BranchOptions {
   checkpointId?: string;
@@ -10,28 +11,14 @@ export async function branchCommand(args: string[], store = new FileRunStore(), 
   const [runId, ...optionArgs] = args;
   if (!runId) throw new Error("Usage: wayward branch <run-id> [--checkpoint <checkpoint-id>] [--name <name>]");
   const branchOptions = parseBranchOptions(optionArgs);
-  const run = await store.getRun(runId);
-  const checkpoint = branchOptions.checkpointId
-    ? run.checkpoints.find((candidate) => candidate.id === branchOptions.checkpointId)
-    : undefined;
-  if (branchOptions.checkpointId && !checkpoint) throw new Error(`Unknown checkpoint ${branchOptions.checkpointId} for run ${runId}`);
-
-  const jobId = sanitizeBranchPart(branchOptions.name ?? `branch-${createId("job").slice(4, 12)}`);
-  const baseRef = checkpoint?.gitRef ?? "HEAD";
-  const worktree = await new RunWorktreeService(store, dependencies.git ?? new RealGitClient()).createForRun(dependencies.repoPath ?? process.cwd(), {
+  const branched = await new RunBranchService(store, dependencies.git ?? new RealGitClient()).branch(dependencies.repoPath ?? invocationCwd(), {
     runId,
-    jobId,
-    baseRef
+    checkpointId: branchOptions.checkpointId,
+    name: branchOptions.name
   });
 
   return JSON.stringify(
-    {
-      runId,
-      worktreePath: worktree.path,
-      branch: worktree.branch,
-      baseRef,
-      checkpointId: checkpoint?.id
-    },
+    branched,
     null,
     2
   );
@@ -56,8 +43,4 @@ function parseBranchOptions(args: string[]): BranchOptions {
     throw new Error(`Unknown branch option ${arg}`);
   }
   return options;
-}
-
-function sanitizeBranchPart(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "branch";
 }

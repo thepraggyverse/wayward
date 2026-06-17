@@ -1,12 +1,14 @@
 {
   "name": "wayward",
   "version": "0.1.0",
-  "description": "Routes multi-agent Codex workflows through the Wayward runtime.",
+  "description": "Codex skills and MCP tools for local Wayward workflow runs.",
   "skills": [
     "../../skills/ultrareview/SKILL.md",
     "../../skills/security-review/SKILL.md",
     "../../skills/open-pr-audit/SKILL.md",
-    "../../skills/tournament/SKILL.md"
+    "../../skills/tournament/SKILL.md",
+    "../../skills/checkpoint-rewind-branch/SKILL.md",
+    "../../skills/run-inspection/SKILL.md"
   ],
   "mcpServers": {
     "wayward": {
