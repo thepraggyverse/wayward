@@ -2,12 +2,18 @@
   "name": "@thepraggyverse/mcp-server",
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thepraggyverse/wayward.git",
+    "directory": "packages/mcp-server"
+  },
   "scripts": {
     "start": "tsx src/server-cli.ts"
   },
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
-  "files": ["dist"],
+  "files": ["dist/src"],
   "exports": { ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" } },
   "dependencies": {
     "@thepraggyverse/checkpoints": "workspace:*",

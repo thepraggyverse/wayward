@@ -2,9 +2,21 @@
   "name": "@thepraggyverse/workflows",
   "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thepraggyverse/wayward.git",
+    "directory": "workflows"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist/index.*",
+    "dist/open-pr-audit/index.*",
+    "dist/shared/review-schemas.*",
+    "dist/tournament/index.*",
+    "dist/ultrareview/index.*"
+  ],
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "dependencies": {
     "@thepraggyverse/codex-adapter": "workspace:*",

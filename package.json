@@ -5,6 +5,14 @@
   "type": "module",
   "description": "Let agents wander. Keep the work under control.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thepraggyverse/wayward.git"
+  },
+  "bugs": {
+    "url": "https://github.com/thepraggyverse/wayward/issues"
+  },
+  "homepage": "https://github.com/thepraggyverse/wayward#readme",
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "build": "tsc -b",
