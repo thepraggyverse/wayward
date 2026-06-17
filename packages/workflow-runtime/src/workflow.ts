@@ -59,6 +59,27 @@ export class WorkflowRuntime {
 
 function renderReport(workflowName: string, results: PhaseResult[]): string {
   const lastOutput = [...results].reverse().find((result) => result.output)?.output;
+  if (isReviewReport(lastOutput)) {
+    const findings = lastOutput.findings.length
+      ? lastOutput.findings.map((finding, index) => [
+          `### ${index + 1}. ${finding.title}`,
+          "",
+          `- Severity: ${finding.severity}`,
+          `- Evidence: ${finding.evidence}`
+        ].join("\n")).join("\n\n")
+      : "No findings were reported.";
+    return `# ${workflowName}\n\nCompleted ${results.length} phases.\n\n## Summary\n\n${lastOutput.summary}\n\n## Findings\n\n${findings}\n`;
+  }
   const body = typeof lastOutput === "object" && lastOutput ? `\n\n\`\`\`json\n${JSON.stringify(lastOutput, null, 2)}\n\`\`\`\n` : "";
   return `# ${workflowName}\n\nCompleted ${results.length} phases.${body}`;
+}
+
+function isReviewReport(value: unknown): value is { summary: string; findings: Array<{ title: string; severity: string; evidence: string }> } {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.summary === "string" && Array.isArray(record.findings) && record.findings.every((finding) => {
+    if (!finding || typeof finding !== "object") return false;
+    const candidate = finding as Record<string, unknown>;
+    return typeof candidate.title === "string" && typeof candidate.severity === "string" && typeof candidate.evidence === "string";
+  });
 }

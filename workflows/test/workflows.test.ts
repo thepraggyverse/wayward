@@ -3,9 +3,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileRunStore, type JobState } from "@thepraggyverse/core";
+import { CodexAdapter, type CliRunner } from "@thepraggyverse/codex-adapter";
 import type { WorktreeMetadata } from "@thepraggyverse/git-worktrees";
 import { WorkflowRuntime } from "@thepraggyverse/workflow-runtime";
-import { createOpenPrAuditWorkflow, createTournamentWorkflow, createUltrareviewWorkflow, type TournamentWorkflowDependencies } from "../index.js";
+import { createOpenPrAuditWorkflow, createTournamentWorkflow, createUltrareviewWorkflow, type TournamentWorkflowDependencies, type UltrareviewWorkflowDependencies } from "../index.js";
 import { reportSchema } from "../shared/review-schemas.js";
 
 const tempDirs: string[] = [];
@@ -43,6 +44,34 @@ class FakeTournamentAdapter {
   }
 }
 
+class FakeCodexRunner implements CliRunner {
+  readonly calls: Array<{ command: string; args: string[]; cwd: string }> = [];
+  constructor(private readonly failures: Record<string, { code: number; stderr: string; timedOut?: boolean }> = {}) {}
+  async run(command: string, args: string[], options: { cwd: string; onStdout?: (line: string) => void; onStderr?: (line: string) => void }) {
+    this.calls.push({ command, args, cwd: options.cwd });
+    const prompt = args.at(-1) ?? "";
+    const reviewer = prompt.match(/Wayward ([^.]+)\./)?.[1] ?? "Unknown reviewer";
+    const failure = Object.entries(this.failures).find(([name]) => reviewer.includes(name))?.[1];
+    if (failure) {
+      options.onStderr?.(failure.stderr);
+      return { code: failure.code, stdout: "", stderr: failure.stderr, timedOut: failure.timedOut ?? false };
+    }
+    const payload = {
+      summary: `${reviewer} completed.`,
+      findings: [
+        {
+          title: `${reviewer} finding`,
+          severity: "medium",
+          evidence: `evidence from ${reviewer}`
+        }
+      ]
+    };
+    const line = JSON.stringify({ type: "assistant_message", message: { content: [{ type: "output_text", text: JSON.stringify(payload) }] } });
+    options.onStdout?.(line);
+    return { code: 0, stdout: `${line}\n`, stderr: "", timedOut: false };
+  }
+}
+
 function tournamentFakes(root: string, states: Record<string, JobState> = {}) {
   const worktrees = new FakeTournamentWorktrees(root);
   let adapter: FakeTournamentAdapter | undefined;
@@ -59,18 +88,70 @@ function tournamentFakes(root: string, states: Record<string, JobState> = {}) {
   } };
 }
 
+function ultrareviewFakes(failures: Record<string, { code: number; stderr: string; timedOut?: boolean }> = {}) {
+  const runner = new FakeCodexRunner(failures);
+  const dependencies: UltrareviewWorkflowDependencies = {
+    adapterFactory: (store) => new CodexAdapter(store, runner)
+  };
+  return { dependencies, runner };
+}
+
 describe("built-in workflows", () => {
-  it("ultrareview emits specialist evidence artifacts and a synthesized report", async () => {
+  it("ultrareview runs Codex specialist reviewers and synthesizes artifact-backed findings", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wayward-packs-"));
     tempDirs.push(dir);
     const store = new FileRunStore(join(dir, "runs"));
-    const result = await new WorkflowRuntime(store).run(createUltrareviewWorkflow(), {});
+    const fakes = ultrareviewFakes();
+    const result = await new WorkflowRuntime(store).run(createUltrareviewWorkflow(fakes.dependencies), { repo: dir });
     const run = await store.getRun(result.runId);
+    const report = await readFile(run.reports[0]!.path, "utf8");
 
     expect(run.state).toBe("completed");
+    expect(run.mode).toBe("inspect");
     expect(run.reports).toHaveLength(1);
-    expect(run.artifacts).toHaveLength(4);
-    expect(JSON.stringify(result.results.at(-1)?.output)).toContain("artifact:correctness");
+    expect(fakes.runner.calls).toHaveLength(5);
+    expect(fakes.runner.calls.every((call) => call.command === "codex" && call.cwd === dir)).toBe(true);
+    expect(fakes.runner.calls.every((call) => call.args.slice(0, 4).join(" ") === "exec --json --sandbox read-only")).toBe(true);
+    expect(run.jobs.map((job) => [job.id, job.state])).toEqual([
+      ["reviewer-correctness", "completed"],
+      ["reviewer-security", "completed"],
+      ["reviewer-tests", "completed"],
+      ["reviewer-maintainability", "completed"],
+      ["reviewer-adversarial-verifier", "completed"]
+    ]);
+    expect(run.artifacts.map((artifact) => artifact.id)).toEqual(expect.arrayContaining([
+      "reviewer-correctness-raw",
+      "reviewer-correctness-summary",
+      "reviewer-security-raw",
+      "reviewer-security-summary",
+      "reviewer-tests-raw",
+      "reviewer-tests-summary",
+      "reviewer-maintainability-raw",
+      "reviewer-maintainability-summary",
+      "reviewer-adversarial-verifier-raw",
+      "reviewer-adversarial-verifier-summary",
+      "ultrareview-synthesis"
+    ]));
+    expect(JSON.stringify(result.results.at(-1)?.output)).toContain("artifact:reviewer-correctness-raw");
+    expect(report).toContain("## Summary");
+    expect(report).toContain("[Correctness reviewer]");
+    expect(report).toContain("artifact:reviewer-correctness-summary");
+  });
+
+  it("ultrareview records failed reviewers and still completes synthesis", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-packs-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const fakes = ultrareviewFakes({ "Security reviewer": { code: 124, stderr: "review timed out", timedOut: true } });
+    const result = await new WorkflowRuntime(store).run(createUltrareviewWorkflow(fakes.dependencies), { repo: dir });
+    const run = await store.getRun(result.runId);
+    const output = result.results.at(-1)?.output as { summary: string; findings: Array<{ title: string; evidence: string }> };
+
+    expect(run.state).toBe("completed");
+    expect(run.jobs.find((job) => job.id === "reviewer-security")?.state).toBe("timed_out");
+    expect(run.artifacts.map((artifact) => artifact.id)).toEqual(expect.arrayContaining(["reviewer-security-raw", "reviewer-security-summary", "ultrareview-synthesis"]));
+    expect(output.summary).toContain("4 completed; 1 failed or timed out");
+    expect(output.findings.find((finding) => finding.title.includes("Security reviewer"))?.evidence).toContain("artifact:reviewer-security-summary");
   });
 
   it("open-pr-audit stops at its external-action gate with a pending approval", async () => {

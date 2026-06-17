@@ -4,7 +4,7 @@ import { ProcessCliRunner, type CliRunner } from "./cli-runner.js";
 export class CodexAdapter {
   constructor(private readonly store: FileRunStore, private readonly runner: CliRunner = new ProcessCliRunner()) {}
 
-  async startExecJob(input: { runId: string; jobId: string; cwd: string; prompt: string; timeoutMs?: number }): Promise<JobState> {
+  async startExecJob(input: { runId: string; jobId: string; cwd: string; prompt: string; timeoutMs?: number; sandbox?: "read-only" | "workspace-write" | "danger-full-access" }): Promise<JobState> {
     const rawLines: string[] = [];
     await this.store.upsertJob(input.runId, {
       id: input.jobId,
@@ -13,7 +13,8 @@ export class CodexAdapter {
       startedAt: new Date().toISOString()
     });
     try {
-      const result = await this.runner.run("codex", ["exec", "--json", input.prompt], {
+      const args = ["exec", "--json", ...(input.sandbox ? ["--sandbox", input.sandbox] : []), input.prompt];
+      const result = await this.runner.run("codex", args, {
         cwd: input.cwd,
         timeoutMs: input.timeoutMs,
         onStdout: (line) => rawLines.push(line),
