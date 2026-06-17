@@ -1,7 +1,7 @@
 {
   "name": "wayward",
   "version": "0.1.0",
-  "description": "Codex skills and MCP tools for local Wayward workflow runs.",
+  "description": "Codex skills and local stdio MCP tools for Wayward workflow runs.",
   "skills": [
     "../../skills/ultrareview/SKILL.md",
     "../../skills/security-review/SKILL.md",
