@@ -12,9 +12,22 @@ describe("Wayward MCP tools", () => {
   it("maps tools to the same core services as the CLI", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wayward-mcp-"));
     tempDirs.push(dir);
-    const tools = createWaywardMcpTools(new FileRunStore(join(dir, "runs")));
+    const tools = createWaywardMcpTools(new FileRunStore(join(dir, "runs")), {
+      getWorkflow: () => ({
+        name: "test-report",
+        phases: [
+          {
+            id: "synthesize",
+            kind: "synthesize",
+            async run() {
+              return { summary: "MCP smoke report" };
+            }
+          }
+        ]
+      })
+    });
 
-    const run = await tools.createRun({ workflow: "open-pr-audit", inputs: { prs: [1] } });
+    const run = await tools.createRun({ workflow: "test-report", inputs: { prs: [1] } });
     const checkpoint = await tools.createCheckpoint({ runId: run.runId, label: "before", gitRef: "refs/test" });
     const approval = await tools.requestApproval({ runId: run.runId, requestedAction: "comment-on-pr", evidence: ["report"] });
 

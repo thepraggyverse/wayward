@@ -6,7 +6,7 @@ import { FileRunStore, type JobState } from "@thepraggyverse/core";
 import { CodexAdapter, type CliRunner } from "@thepraggyverse/codex-adapter";
 import type { WorktreeMetadata } from "@thepraggyverse/git-worktrees";
 import { WorkflowRuntime } from "@thepraggyverse/workflow-runtime";
-import { createOpenPrAuditWorkflow, createTournamentWorkflow, createUltrareviewWorkflow, type TournamentWorkflowDependencies, type UltrareviewWorkflowDependencies } from "../index.js";
+import { createOpenPrAuditWorkflow, createTournamentWorkflow, createUltrareviewWorkflow, type GhRunner, type TournamentWorkflowDependencies, type UltrareviewWorkflowDependencies } from "../index.js";
 import { reportSchema } from "../shared/review-schemas.js";
 
 const tempDirs: string[] = [];
@@ -69,6 +69,68 @@ class FakeCodexRunner implements CliRunner {
     const line = JSON.stringify({ type: "assistant_message", message: { content: [{ type: "output_text", text: JSON.stringify(payload) }] } });
     options.onStdout?.(line);
     return { code: 0, stdout: `${line}\n`, stderr: "", timedOut: false };
+  }
+}
+
+class FakeGhRunner implements GhRunner {
+  readonly calls: Array<{ args: string[]; cwd: string }> = [];
+  async run(args: string[], options: { cwd: string }) {
+    this.calls.push({ args, cwd: options.cwd });
+    if (args.join(" ").startsWith("pr list ")) {
+      return {
+        code: 0,
+        stdout: JSON.stringify([
+          { number: 7, title: "Touch runtime", author: { login: "alice" }, headRefName: "alice/runtime", baseRefName: "main", isDraft: false, updatedAt: "2026-04-01T00:00:00Z" },
+          { number: 8, title: "Touch docs and runtime", author: { login: "bob" }, headRefName: "bob/docs", baseRefName: "main", isDraft: true, updatedAt: "2026-06-17T00:00:00Z" }
+        ]),
+        stderr: ""
+      };
+    }
+    if (args.join(" ") === "pr view 7 --json number,title,author,headRefName,baseRefName,isDraft,mergeStateStatus,updatedAt,reviewDecision,latestReviews,statusCheckRollup") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          number: 7,
+          title: "Touch runtime",
+          author: { login: "alice" },
+          headRefName: "alice/runtime",
+          baseRefName: "main",
+          isDraft: false,
+          mergeStateStatus: "DIRTY",
+          updatedAt: "2026-04-01T00:00:00Z",
+          reviewDecision: "CHANGES_REQUESTED",
+          latestReviews: [{ author: { login: "reviewer" }, state: "CHANGES_REQUESTED", submittedAt: "2026-04-02T00:00:00Z" }],
+          statusCheckRollup: [{ name: "test", status: "COMPLETED", conclusion: "FAILURE" }]
+        }),
+        stderr: ""
+      };
+    }
+    if (args.join(" ") === "pr view 8 --json number,title,author,headRefName,baseRefName,isDraft,mergeStateStatus,updatedAt,reviewDecision,latestReviews,statusCheckRollup") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          number: 8,
+          title: "Touch docs and runtime",
+          author: { login: "bob" },
+          headRefName: "bob/docs",
+          baseRefName: "main",
+          isDraft: true,
+          mergeStateStatus: "CLEAN",
+          updatedAt: "2026-06-17T00:00:00Z",
+          reviewDecision: "APPROVED",
+          latestReviews: [{ author: { login: "reviewer" }, state: "APPROVED", submittedAt: "2026-06-17T01:00:00Z" }],
+          statusCheckRollup: []
+        }),
+        stderr: ""
+      };
+    }
+    if (args.join(" ") === "pr diff 7 --name-only") {
+      return { code: 0, stdout: "packages/core/src/run-store.ts\npackage.json\n", stderr: "" };
+    }
+    if (args.join(" ") === "pr diff 8 --name-only") {
+      return { code: 0, stdout: "packages/core/src/run-store.ts\ndocs/workflows.md\n", stderr: "" };
+    }
+    return { code: 1, stdout: "", stderr: `unexpected gh call: ${args.join(" ")}` };
   }
 }
 
@@ -158,14 +220,45 @@ describe("built-in workflows", () => {
     const dir = await mkdtemp(join(tmpdir(), "wayward-packs-"));
     tempDirs.push(dir);
     const store = new FileRunStore(join(dir, "runs"));
-    const result = await new WorkflowRuntime(store).run(createOpenPrAuditWorkflow(), { prs: [1, 2] });
+    const ghRunner = new FakeGhRunner();
+    const result = await new WorkflowRuntime(store).run(createOpenPrAuditWorkflow({
+      ghRunner,
+      now: () => new Date("2026-06-18T00:00:00Z")
+    }), { repo: dir, staleDays: 30 });
     const run = await store.getRun(result.runId);
+    const report = await readFile(run.reports[0]!.path, "utf8");
 
     expect(result.results.map((phase) => phase.phaseId)).toEqual(["audit", "rule", "verify", "synthesize", "external-action-gate"]);
     expect(run.state).toBe("needs_approval");
     expect(run.reports).toHaveLength(1);
     expect(run.approvals[0]?.requestedAction).toBe("external-action-gate");
     expect(run.approvals[0]?.evidence).toEqual([run.reports[0]?.id]);
+    expect(ghRunner.calls.map((call) => call.args.slice(0, 3).join(" "))).toEqual([
+      "pr list --state",
+      "pr view 7",
+      "pr view 8",
+      "pr diff 7",
+      "pr diff 8"
+    ]);
+    expect(ghRunner.calls.every((call) => call.cwd === dir)).toBe(true);
+    expect(run.artifacts.map((artifact) => artifact.id)).toEqual(expect.arrayContaining([
+      "gh-pr-list-raw",
+      "gh-pr-7-view-raw",
+      "gh-pr-7-diff-name-only-raw",
+      "gh-pr-8-view-raw",
+      "gh-pr-8-diff-name-only-raw",
+      "pr-7-audit",
+      "pr-8-audit",
+      "open-pr-audit-normalized",
+      "open-pr-audit-synthesis"
+    ]));
+    expect(report).toContain("PR #7 changes risky files");
+    expect(report).toContain("PR #7 is stale");
+    expect(report).toContain("PR #7 has failing checks");
+    expect(report).toContain("PR #7 has changes requested");
+    expect(report).toContain("PR #7 mergeability is DIRTY");
+    expect(report).toContain("PR #8 has no checks reported");
+    expect(report).toContain("PR #8 is still draft");
 
     const events = await store.readEvents(result.runId);
     expect(events.find((event) => event.type === "approval.requested")?.payload).toMatchObject({

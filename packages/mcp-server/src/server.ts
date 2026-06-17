@@ -1,13 +1,14 @@
 import { createId, FileRunStore } from "@thepraggyverse/core";
 import { RewindService } from "@thepraggyverse/checkpoints";
 import { RealGitClient } from "@thepraggyverse/git-worktrees";
-import { WorkflowRuntime } from "@thepraggyverse/workflow-runtime";
+import { WorkflowRuntime, type WorkflowDefinition } from "@thepraggyverse/workflow-runtime";
 import { getWorkflow } from "@thepraggyverse/workflows";
 
-export function createWaywardMcpTools(store = new FileRunStore()) {
+export function createWaywardMcpTools(store = new FileRunStore(), dependencies: { getWorkflow?: (name: string) => WorkflowDefinition } = {}) {
+  const resolveWorkflow = dependencies.getWorkflow ?? getWorkflow;
   return {
     async createRun(input: { workflow: string; inputs?: Record<string, unknown> }) {
-      return new WorkflowRuntime(store).run(getWorkflow(input.workflow), input.inputs ?? {});
+      return new WorkflowRuntime(store).run(resolveWorkflow(input.workflow), input.inputs ?? {});
     },
     async listRuns() {
       return store.listRuns();

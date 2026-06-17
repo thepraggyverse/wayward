@@ -11,7 +11,7 @@ import { runCommand } from "./commands/run.js";
 export async function main(argv = process.argv.slice(2)): Promise<string> {
   const [command, ...args] = argv;
   if (!command || command === "help" || command === "--help") return "Usage: wayward run|board|checkpoints|rewind|branch|approvals";
-  if (command === "run" || command === "ultrareview" || command === "pr-audit" || command === "tournament") {
+  if (command === "run" || command === "ultrareview" || command === "open-pr-audit" || command === "pr-audit" || command === "tournament") {
     return runCommand(command === "run" ? args : [command, ...args]);
   }
   if (command === "board") return boardCommand();
