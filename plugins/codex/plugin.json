@@ -1,0 +1,17 @@
+{
+  "name": "wayward",
+  "version": "0.1.0",
+  "description": "Routes multi-agent Codex workflows through the Wayward runtime.",
+  "skills": [
+    "../../skills/ultrareview/SKILL.md",
+    "../../skills/security-review/SKILL.md",
+    "../../skills/open-pr-audit/SKILL.md",
+    "../../skills/tournament/SKILL.md"
+  ],
+  "mcpServers": {
+    "wayward": {
+      "command": "pnpm",
+      "args": ["--filter", "@thepraggyverse/mcp-server", "start"]
+    }
+  }
+}

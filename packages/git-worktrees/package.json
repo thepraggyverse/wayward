@@ -1,0 +1,12 @@
+{
+  "name": "@thepraggyverse/git-worktrees",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist"],
+  "exports": { ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" } },
+  "dependencies": {
+    "@thepraggyverse/core": "workspace:*"
+  }
+}

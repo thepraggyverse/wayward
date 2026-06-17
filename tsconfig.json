@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/git-worktrees" },
+    { "path": "packages/checkpoints" },
+    { "path": "packages/codex-adapter" },
+    { "path": "packages/workflow-runtime" },
+    { "path": "workflows" },
+    { "path": "packages/cli" },
+    { "path": "packages/mcp-server" }
+  ]
+}

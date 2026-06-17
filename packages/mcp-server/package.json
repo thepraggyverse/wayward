@@ -1,0 +1,19 @@
+{
+  "name": "@thepraggyverse/mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server-cli.ts"
+  },
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist"],
+  "exports": { ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" } },
+  "dependencies": {
+    "@thepraggyverse/checkpoints": "workspace:*",
+    "@thepraggyverse/core": "workspace:*",
+    "@thepraggyverse/git-worktrees": "workspace:*",
+    "@thepraggyverse/workflow-runtime": "workspace:*",
+    "@thepraggyverse/workflows": "workspace:*"
+  }
+}
