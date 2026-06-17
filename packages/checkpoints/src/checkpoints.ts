@@ -14,7 +14,7 @@ export class CheckpointManager {
     const env = { GIT_INDEX_FILE: indexPath };
     try {
       await this.git.exec(["read-tree", "HEAD"], { cwd: repoPath, env });
-      await this.git.exec(["add", "-A"], { cwd: repoPath, env });
+      await this.git.exec(["add", "-A", "--", ".", ":(exclude).wayward"], { cwd: repoPath, env });
       const tree = (await this.git.exec(["write-tree"], { cwd: repoPath, env })).stdout.trim();
       const commit = (await this.git.exec(["commit-tree", tree, "-p", "HEAD", "-m", `wayward checkpoint: ${label}`], { cwd: repoPath })).stdout.trim();
       await this.git.exec(["update-ref", gitRef, commit], { cwd: repoPath });

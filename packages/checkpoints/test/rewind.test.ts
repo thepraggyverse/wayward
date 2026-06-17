@@ -8,9 +8,11 @@ import { CheckpointManager, RewindService } from "../src/index.js";
 
 class FakeGit implements GitClient {
   calls: string[][] = [];
+  status = "";
   async exec(args: string[]) {
     this.calls.push(args);
     if (args.join(" ") === "rev-parse --git-dir") return { stdout: ".git\n", stderr: "" };
+    if (args.join(" ") === "status --porcelain -- . :(exclude).wayward") return { stdout: this.status, stderr: "" };
     if (args[0] === "write-tree") return { stdout: "tree-sha\n", stderr: "" };
     if (args[0] === "commit-tree") return { stdout: "commit-sha\n", stderr: "" };
     return { stdout: "", stderr: "" };
@@ -36,6 +38,24 @@ describe("checkpoint rewind", () => {
     expect(reloaded.state).toBe("rewound");
     expect(reloaded.checkpoints).toHaveLength(2);
     expect(git.calls).toContainEqual(["update-ref", first.gitRef, "commit-sha"]);
-    expect(git.calls.at(-1)).toEqual(["restore", "--source", first.gitRef, "--worktree", "--staged", "."]);
+    expect(git.calls.at(-1)).toEqual(["read-tree", "--reset", "-u", first.gitRef]);
+  });
+
+  it("creates a safety checkpoint before rewinding dirty state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-checkpoints-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const git = new FakeGit();
+    git.status = " M src/app.ts\n";
+    const run = await store.createRun({ workflowName: "tournament" });
+    const target = await new CheckpointManager(git, store).createCheckpoint(dir, run.id, "target");
+
+    const result = await new RewindService(git, store).rewind(dir, run.id, target.id);
+
+    const reloaded = await store.getRun(run.id);
+    expect(result.safetyCheckpoint?.label).toBe(`pre-rewind to ${target.id}`);
+    expect(reloaded.checkpoints.map((checkpoint) => checkpoint.id)).toContain(target.id);
+    expect(reloaded.checkpoints).toHaveLength(2);
+    expect(git.calls.at(-1)).toEqual(["read-tree", "--reset", "-u", target.gitRef]);
   });
 });
