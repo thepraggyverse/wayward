@@ -28,10 +28,11 @@ export class WorkflowRuntime {
         results.push({ phaseId: phase.id, kind: phase.kind, state: "completed", output: parsedOutput });
         current = parsedOutput;
         if (phase.kind === "gate") {
+          const report = await this.store.writeReport(run.id, `${workflow.name} report`, renderReport(workflow.name, results));
           await this.store.addApproval(run.id, {
             id: createId("approval"),
             requestedAction: phase.id,
-            evidence: [],
+            evidence: [report.id],
             state: "pending"
           });
           return { runId: run.id, results };

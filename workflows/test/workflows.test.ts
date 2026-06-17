@@ -33,7 +33,9 @@ describe("built-in workflows", () => {
 
     expect(result.results.map((phase) => phase.phaseId)).toEqual(["audit", "rule", "verify", "synthesize", "external-action-gate"]);
     expect(run.state).toBe("needs_approval");
+    expect(run.reports).toHaveLength(1);
     expect(run.approvals[0]?.requestedAction).toBe("external-action-gate");
+    expect(run.approvals[0]?.evidence).toEqual([run.reports[0]?.id]);
   });
 
   it("tournament reports a winner with validation evidence", async () => {
