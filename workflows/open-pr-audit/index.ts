@@ -71,6 +71,7 @@ interface AuditOutput {
   staleThresholdDays: number;
   listLimit: number;
   listMayBeTruncated: boolean;
+  listWarning?: string;
   rawArtifactIds: string[];
   normalizedArtifactIds: string[];
   prs: PullRequestAudit[];
@@ -123,6 +124,7 @@ export function createOpenPrAuditWorkflow(dependencies: OpenPrAuditWorkflowDepen
           const staleThresholdDays = input.staleDays ?? dependencies.staleDays ?? DEFAULT_STALE_DAYS;
           const list = await runGhJsonArray(context, gh, input.repo, ["pr", "list", "--state", "open", "--json", GH_PR_JSON_FIELDS, "--limit", String(OPEN_PR_LIST_LIMIT)], "gh-pr-list-raw", timeoutMs);
           const listMayBeTruncated = list.items.length >= OPEN_PR_LIST_LIMIT;
+          const listWarning = firstPageWarning(list.items.length, OPEN_PR_LIST_LIMIT);
           const prs = await runWithConcurrency(list.items, 4, async (rawPr) => collectPullRequest(context, gh, input.repo, rawPr, timeoutMs));
           const overlaps = findOverlaps(prs);
           const now = dependencies.now?.() ?? new Date();
@@ -140,13 +142,14 @@ export function createOpenPrAuditWorkflow(dependencies: OpenPrAuditWorkflowDepen
           const normalized = await context.store.writeArtifact(
             context.runId,
             { id: "open-pr-audit-normalized", kind: "open-pr-audit-normalized-json" },
-            `${JSON.stringify({ repo: input.repo, staleThresholdDays, listLimit: OPEN_PR_LIST_LIMIT, listMayBeTruncated, prs: audits, overlaps }, null, 2)}\n`
+            `${JSON.stringify({ repo: input.repo, staleThresholdDays, listLimit: OPEN_PR_LIST_LIMIT, listMayBeTruncated, listWarning, prs: audits, overlaps }, null, 2)}\n`
           );
           return {
             repo: input.repo,
             staleThresholdDays,
             listLimit: OPEN_PR_LIST_LIMIT,
             listMayBeTruncated,
+            listWarning,
             rawArtifactIds: [list.artifactId, ...prs.flatMap((pr) => pr.rawArtifactIds)],
             normalizedArtifactIds: [normalized.id, ...audits.map((audit) => audit.artifactId)],
             prs: audits,
@@ -189,7 +192,7 @@ export function createOpenPrAuditWorkflow(dependencies: OpenPrAuditWorkflowDepen
           const riskSignalCount = input.prs.reduce((count, audit) => count + audit.findings.length, 0) + (input.listMayBeTruncated ? 1 : 0);
           const summary = [
             `Audited ${input.prs.length} open pull request${input.prs.length === 1 ? "" : "s"} in ${input.repo} using read-only GitHub CLI commands.`,
-            input.listMayBeTruncated ? `The audit reached the gh pr list limit of ${input.listLimit}; there may be additional open PRs not included in this run.` : undefined,
+            input.listWarning,
             riskSignalCount
               ? `Found ${riskSignalCount} risk signal${riskSignalCount === 1 ? "" : "s"} across stale state, changed-file risk, overlapping scopes, checks, reviews, and mergeability.`
               : "No PR risk signals were found across stale state, changed-file risk, overlapping scopes, checks, reviews, and mergeability.",
@@ -202,6 +205,7 @@ export function createOpenPrAuditWorkflow(dependencies: OpenPrAuditWorkflowDepen
               repo: input.repo,
               listLimit: input.listLimit,
               listMayBeTruncated: input.listMayBeTruncated,
+              listWarning: input.listWarning,
               summary,
               findings,
               rawArtifactIds: input.rawArtifactIds,
@@ -466,8 +470,13 @@ function truncationFindings(input: AuditOutput): ReviewFinding[] {
   return [{
     title: `Open PR audit reached first ${input.listLimit} PRs`,
     severity: "medium",
-    evidence: `gh pr list returned ${input.prs.length} PRs with --limit ${input.listLimit}; additional open PRs may exist beyond this audit window. Raw artifacts: ${artifactEvidence(input.rawArtifactIds.slice(0, 1))}.`
+    evidence: `${input.listWarning ?? firstPageWarning(input.prs.length, input.listLimit)} Raw artifacts: ${artifactEvidence(input.rawArtifactIds.slice(0, 1))}.`
   }];
+}
+
+function firstPageWarning(count: number, limit: number): string | undefined {
+  if (count < limit) return undefined;
+  return `The audit reached the gh pr list limit of ${limit}; additional open PRs may exist beyond this audit window.`;
 }
 
 function findRiskyFiles(paths: string[]): string[] {

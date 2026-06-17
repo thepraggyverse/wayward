@@ -64,6 +64,7 @@ Expected behavior:
 
 - The workflow runs read-only `gh pr list`, `gh pr view`, and `gh pr diff --name-only` calls.
 - Raw `gh` output and normalized audit artifacts are persisted.
+- If the first 100 open PRs fill the current audit window, the normalized artifact and report include a warning that more open PRs may exist.
 - A Markdown report is generated.
 - The run pauses at `external-action-gate`.
 - No comments, merges, closes, pushes, or other GitHub mutations are performed automatically.
