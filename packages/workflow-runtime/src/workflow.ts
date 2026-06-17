@@ -3,6 +3,8 @@ import type { PhaseDefinition, PhaseResult } from "./phases.js";
 
 export interface WorkflowDefinition {
   name: string;
+  defaultMode?: PermissionMode;
+  requiredMode?: PermissionMode;
   phases: PhaseDefinition[];
 }
 
@@ -14,7 +16,15 @@ export class WorkflowRuntime {
     input: Record<string, unknown> = {},
     options: { adapter?: string; mode?: PermissionMode } = {}
   ): Promise<{ runId: string; results: PhaseResult[] }> {
-    const run = await this.store.createRun({ workflowName: workflow.name, inputs: input, adapter: options.adapter, mode: options.mode });
+    const mode = options.mode ?? workflow.defaultMode ?? "inspect";
+    const run = await this.store.createRun({ workflowName: workflow.name, inputs: input, adapter: options.adapter, mode });
+    const requiredMode = workflow.requiredMode ?? "inspect";
+    if (!allowsPermissionMode(mode, requiredMode)) {
+      const error = `${workflow.name} requires ${requiredMode} mode; received ${mode}.`;
+      const result: PhaseResult = { phaseId: "permission-check", kind: "verify", state: "failed", error };
+      await this.store.setRunState(run.id, "failed", { phaseId: result.phaseId, error });
+      return { runId: run.id, results: [result] };
+    }
     await this.store.setRunState(run.id, "running");
     const results: PhaseResult[] = [];
     let current: unknown = input;
@@ -55,6 +65,15 @@ export class WorkflowRuntime {
     await this.store.setRunState(run.id, "completed");
     return { runId: run.id, results };
   }
+}
+
+function allowsPermissionMode(actual: PermissionMode, required: PermissionMode): boolean {
+  const rank: Record<PermissionMode, number> = {
+    inspect: 0,
+    "worktree-write": 1,
+    autopilot: 2
+  };
+  return rank[actual] >= rank[required];
 }
 
 function renderReport(workflowName: string, results: PhaseResult[]): string {

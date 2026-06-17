@@ -8,7 +8,7 @@ import { approvalsCommand } from "../src/commands/approvals.js";
 import { boardCommand } from "../src/commands/board.js";
 import { branchCommand } from "../src/commands/branch.js";
 import { checkpointsCommand } from "../src/commands/checkpoints.js";
-import { runCommand } from "../src/commands/run.js";
+import { runCommand, runStoreRootForRepo } from "../src/commands/run.js";
 
 const tempDirs: string[] = [];
 afterEach(async () => Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -26,11 +26,41 @@ class FakeGit implements GitClient {
 }
 
 describe("CLI commands", () => {
+  it("uses the target repo for default run storage", async () => {
+    const previous = process.env.WAYWARD_RUNS_DIR;
+    const dir = await mkdtemp(join(tmpdir(), "wayward-cli-"));
+    tempDirs.push(dir);
+
+    try {
+      delete process.env.WAYWARD_RUNS_DIR;
+      expect(runStoreRootForRepo(dir)).toBe(join(dir, ".wayward", "runs"));
+
+      process.env.WAYWARD_RUNS_DIR = join(dir, "custom-runs");
+      expect(runStoreRootForRepo(dir)).toBe(join(dir, "custom-runs"));
+    } finally {
+      if (previous === undefined) delete process.env.WAYWARD_RUNS_DIR;
+      else process.env.WAYWARD_RUNS_DIR = previous;
+    }
+  });
+
   it("starts workflows and renders the board from the run store", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wayward-cli-"));
     tempDirs.push(dir);
     const store = new FileRunStore(join(dir, "runs"));
-    const output = JSON.parse(await runCommand(["ultrareview", "--repo", dir], store)) as { runId: string };
+    const output = JSON.parse(await runCommand(["ultrareview", "--repo", dir], store, {
+      getWorkflow: () => ({
+        name: "ultrareview",
+        phases: [
+          {
+            id: "smoke",
+            kind: "verify",
+            async run(input) {
+              return input;
+            }
+          }
+        ]
+      })
+    })) as { runId: string };
     const run = await store.getRun(output.runId);
 
     expect(output.runId).toMatch(/^run-/);

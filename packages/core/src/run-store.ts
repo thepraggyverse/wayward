@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, writeFile, appendFile, rename } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { createEvent, type WaywardEvent } from "./events.js";
 import { createId } from "./ids.js";
 import type { AgentJob, ApprovalDecision, ArtifactRef, CheckpointRecord, CreateRunInput, JobState, ReportRecord, RunState, RunSummary } from "./types.js";
@@ -48,6 +48,17 @@ export class FileRunStore {
     return JSON.parse(await readFile(this.runPath(runId, "summary.json"), "utf8")) as RunSummary;
   }
 
+  runDirectory(runId: string): string {
+    return this.runPath(runId);
+  }
+
+  containsRunPath(runId: string, candidatePath: string): boolean {
+    const runDirectory = resolve(this.runDirectory(runId));
+    const candidate = resolve(candidatePath);
+    const pathFromRun = relative(runDirectory, candidate);
+    return pathFromRun === "" || (!!pathFromRun && !pathFromRun.startsWith("..") && !isAbsolute(pathFromRun));
+  }
+
   async setRunState(runId: string, state: RunState, payload: Record<string, unknown> = {}): Promise<RunSummary> {
     return this.withRunLock(runId, async () => {
       const run = await this.getRun(runId);
@@ -88,6 +99,7 @@ export class FileRunStore {
   }
 
   async writeArtifact(runId: string, artifact: Omit<ArtifactRef, "path">, content: string): Promise<ArtifactRef> {
+    assertSafeId(artifact.id, "artifact id");
     return this.withRunLock(runId, async () => {
       const fileName = `${artifact.id}.jsonl`;
       const path = this.runPath(runId, "artifacts", fileName);
@@ -190,6 +202,7 @@ export class FileRunStore {
   }
 
   private runPath(runId: string, ...parts: string[]): string {
+    assertSafeId(runId, "run id");
     return join(this.rootDir, runId, ...parts);
   }
 
@@ -213,4 +226,8 @@ export class FileRunStore {
 
 function defaultRunRoot(): string {
   return process.env.WAYWARD_RUNS_DIR ?? join(process.env.INIT_CWD ?? process.cwd(), ".wayward", "runs");
+}
+
+function assertSafeId(value: string, label: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) throw new Error(`Unsafe ${label}: ${value}`);
 }

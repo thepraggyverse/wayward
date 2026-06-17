@@ -223,6 +223,9 @@ export function createWaywardMcpTools(store = new FileRunStore(), dependencies: 
         const qualifier = args.reportId ? `report ${args.reportId}` : "a report";
         throw new WaywardMcpUserError(`Run ${args.runId} does not have ${qualifier}.`);
       }
+      if (!store.containsRunPath(args.runId, report.path)) {
+        throw new WaywardMcpUserError(`Run ${args.runId} report ${report.id} points outside its run directory.`);
+      }
       return {
         runId: args.runId,
         report,

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -126,5 +126,19 @@ describe("Wayward MCP tools", () => {
 
     await expect(callWaywardMcpTool(tools, "missingTool", {})).rejects.toThrow("Unknown Wayward MCP tool missingTool.");
     expect(toMcpError(new Error("boom\n    at /private/path/server.ts:10:1")).message).toBe("boom");
+  });
+
+  it("refuses to read report paths outside the selected run directory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-mcp-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const tools = createWaywardMcpTools(store);
+    const run = await store.createRun({ workflowName: "tampered" });
+    await store.writeReport(run.id, "Report", "# Report\n");
+    const summary = await store.getRun(run.id);
+    summary.reports[0]!.path = join(dir, "outside.md");
+    await writeFile(join(store.runDirectory(run.id), "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
+
+    await expect(tools.readReport({ runId: run.id })).rejects.toThrow("points outside its run directory");
   });
 });

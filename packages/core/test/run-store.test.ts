@@ -64,6 +64,17 @@ describe("FileRunStore", () => {
     expect(reloaded.approvals).toHaveLength(1);
   });
 
+  it("keeps run and artifact paths inside the run store", async () => {
+    const store = await tempStore();
+    const run = await store.createRun({ workflowName: "ultrareview" });
+
+    expect(store.runDirectory(run.id)).toContain(run.id);
+    expect(store.containsRunPath(run.id, join(store.runDirectory(run.id), "reports", "report.md"))).toBe(true);
+    expect(store.containsRunPath(run.id, join(store.runDirectory(run.id), "..", "other-run", "summary.json"))).toBe(false);
+    await expect(store.getRun("../outside")).rejects.toThrow("Unsafe run id");
+    await expect(store.writeArtifact(run.id, { id: "../outside", kind: "bad" }, "{}\n")).rejects.toThrow("Unsafe artifact id");
+  });
+
   it("approving a pending gate records the decision and completes the run", async () => {
     const store = await tempStore();
     const run = await store.createRun({ workflowName: "open-pr-audit" });

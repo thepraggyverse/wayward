@@ -9,6 +9,46 @@ const tempDirs: string[] = [];
 afterEach(async () => Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
 
 describe("WorkflowRuntime", () => {
+  it("validates optional fields when callers provide them", () => {
+    const schema = objectSchema<{ repo: string; attempts?: number }>("Inputs", ["repo"], {
+      repo: (value): value is string => typeof value === "string",
+      attempts: (value): value is number => value === undefined || (typeof value === "number" && Number.isInteger(value) && value > 0)
+    });
+
+    expect(() => schema.parse({ repo: "/repo", attempts: "many" })).toThrow("Inputs.attempts is invalid");
+    expect(schema.parse({ repo: "/repo" })).toEqual({ repo: "/repo" });
+  });
+
+  it("blocks workflows when the selected permission mode is too weak", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-workflow-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const runtime = new WorkflowRuntime(store);
+    let ran = false;
+
+    const result = await runtime.run({
+      name: "write-workflow",
+      defaultMode: "worktree-write",
+      requiredMode: "worktree-write",
+      phases: [
+        {
+          id: "write",
+          kind: "fanout",
+          async run() {
+            ran = true;
+            return {};
+          }
+        }
+      ]
+    }, {}, { mode: "inspect" });
+
+    expect(ran).toBe(false);
+    expect(result.results).toEqual([
+      expect.objectContaining({ phaseId: "permission-check", state: "failed" })
+    ]);
+    expect((await store.getRun(result.runId)).state).toBe("failed");
+  });
+
   it("validates outputs before downstream phases consume them", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wayward-workflow-"));
     tempDirs.push(dir);

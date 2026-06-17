@@ -1,5 +1,5 @@
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { createId, type FileRunStore, type CheckpointRecord } from "@thepraggyverse/core";
 import type { GitClient } from "@thepraggyverse/git-worktrees";
 
@@ -10,7 +10,8 @@ export class CheckpointManager {
     const id = createId("cp");
     const gitRef = `refs/wayward/${runId}/${id}`;
     const gitDir = (await this.git.exec(["rev-parse", "--git-dir"], { cwd: repoPath })).stdout.trim();
-    const indexPath = join(repoPath, gitDir, `${createId("wayward-index")}.tmp`);
+    const gitDirPath = isAbsolute(gitDir) ? gitDir : join(repoPath, gitDir);
+    const indexPath = join(gitDirPath, `${createId("wayward-index")}.tmp`);
     const env = { GIT_INDEX_FILE: indexPath };
     try {
       await this.git.exec(["read-tree", "HEAD"], { cwd: repoPath, env });

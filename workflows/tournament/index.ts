@@ -33,7 +33,7 @@ interface TournamentAttemptOutput {
 }
 
 interface TournamentAdapter {
-  startExecJob(input: { runId: string; jobId: string; cwd: string; prompt: string; timeoutMs?: number }): Promise<JobState>;
+  startExecJob(input: { runId: string; jobId: string; cwd: string; prompt: string; timeoutMs?: number; sandbox?: "read-only" | "workspace-write" | "danger-full-access" }): Promise<JobState>;
 }
 
 interface TournamentWorktrees {
@@ -48,6 +48,8 @@ export interface TournamentWorkflowDependencies {
 export function createTournamentWorkflow(dependencies: TournamentWorkflowDependencies = {}): WorkflowDefinition {
   return {
     name: "tournament",
+    defaultMode: "worktree-write",
+    requiredMode: "worktree-write",
     phases: [
       {
         id: "attempts",
@@ -122,7 +124,7 @@ async function runAttempt(input: {
   try {
     worktree = await input.worktrees.createForRun(input.repo, { runId: input.context.runId, jobId: input.jobId, baseRef: input.baseRef });
     await input.context.store.addWorktreePath(input.context.runId, worktree.path);
-    state = await input.adapter.startExecJob({ runId: input.context.runId, jobId: input.jobId, cwd: worktree.path, prompt: input.prompt });
+    state = await input.adapter.startExecJob({ runId: input.context.runId, jobId: input.jobId, cwd: worktree.path, prompt: input.prompt, sandbox: "workspace-write" });
     const job = (await input.context.store.getRun(input.context.runId)).jobs.find((candidate) => candidate.id === input.jobId);
     error = job?.error;
   } catch (caught) {

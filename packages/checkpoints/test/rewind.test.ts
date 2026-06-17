@@ -8,10 +8,13 @@ import { CheckpointManager, RewindService } from "../src/index.js";
 
 class FakeGit implements GitClient {
   calls: string[][] = [];
+  gitDir = ".git";
+  indexPaths: string[] = [];
   status = "";
-  async exec(args: string[]) {
+  async exec(args: string[], options?: { env?: NodeJS.ProcessEnv }) {
     this.calls.push(args);
-    if (args.join(" ") === "rev-parse --git-dir") return { stdout: ".git\n", stderr: "" };
+    if (options?.env?.GIT_INDEX_FILE) this.indexPaths.push(options.env.GIT_INDEX_FILE);
+    if (args.join(" ") === "rev-parse --git-dir") return { stdout: `${this.gitDir}\n`, stderr: "" };
     if (args.join(" ") === "status --porcelain -- . :(exclude).wayward") return { stdout: this.status, stderr: "" };
     if (args[0] === "write-tree") return { stdout: "tree-sha\n", stderr: "" };
     if (args[0] === "commit-tree") return { stdout: "commit-sha\n", stderr: "" };
@@ -57,5 +60,19 @@ describe("checkpoint rewind", () => {
     expect(reloaded.checkpoints.map((checkpoint) => checkpoint.id)).toContain(target.id);
     expect(reloaded.checkpoints).toHaveLength(2);
     expect(git.calls.at(-1)).toEqual(["read-tree", "--reset", "-u", target.gitRef]);
+  });
+
+  it("places temporary checkpoint indexes under absolute git directories", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-checkpoints-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const git = new FakeGit();
+    git.gitDir = join(dir, ".git", "worktrees", "attempt-1");
+    const run = await store.createRun({ workflowName: "tournament" });
+
+    await new CheckpointManager(git, store).createCheckpoint(dir, run.id, "linked worktree");
+
+    expect(git.indexPaths.every((path) => path.startsWith(git.gitDir))).toBe(true);
+    expect(git.indexPaths.every((path) => !path.includes(`${dir}${dir}`))).toBe(true);
   });
 });

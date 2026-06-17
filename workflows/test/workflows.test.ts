@@ -33,9 +33,11 @@ class FakeTournamentWorktrees {
 
 class FakeTournamentAdapter {
   readonly cwdByJob = new Map<string, string>();
+  readonly sandboxByJob = new Map<string, string | undefined>();
   constructor(private readonly store: FileRunStore, private readonly states: Record<string, JobState> = {}) {}
-  async startExecJob(input: { runId: string; jobId: string; cwd: string }): Promise<JobState> {
+  async startExecJob(input: { runId: string; jobId: string; cwd: string; sandbox?: string }): Promise<JobState> {
     this.cwdByJob.set(input.jobId, input.cwd);
+    this.sandboxByJob.set(input.jobId, input.sandbox);
     const state = this.states[input.jobId] ?? "completed";
     await this.store.upsertJob(input.runId, { id: input.jobId, adapter: "codex", state: "running" });
     await this.store.writeArtifact(input.runId, { id: `${input.jobId}-raw`, kind: "codex-jsonl", sourceJobId: input.jobId }, `{"jobId":"${input.jobId}"}\n`);
@@ -213,7 +215,10 @@ describe("built-in workflows", () => {
     expect(run.jobs.find((job) => job.id === "reviewer-security")?.state).toBe("timed_out");
     expect(run.artifacts.map((artifact) => artifact.id)).toEqual(expect.arrayContaining(["reviewer-security-raw", "reviewer-security-summary", "ultrareview-synthesis"]));
     expect(output.summary).toContain("4 completed; 1 failed or timed out");
-    expect(output.findings.find((finding) => finding.title.includes("Security reviewer"))?.evidence).toContain("artifact:reviewer-security-summary");
+    const timeoutEvidence = output.findings.find((finding) => finding.title.includes("Security reviewer"))?.evidence;
+    expect(timeoutEvidence).toContain("Job ended with state timed_out.");
+    expect(timeoutEvidence).toContain("artifact:reviewer-security-summary");
+    expect(timeoutEvidence).not.toContain("{\"stream\"");
   });
 
   it("open-pr-audit stops at its external-action gate with a pending approval", async () => {
@@ -276,6 +281,7 @@ describe("built-in workflows", () => {
     const run = await store.getRun(result.runId);
 
     expect(run.state).toBe("completed");
+    expect(run.mode).toBe("worktree-write");
     expect(fakes.worktrees.created).toHaveLength(2);
     expect(fakes.worktrees.created.map((worktree) => worktree.jobId)).toEqual(["attempt-1", "attempt-2"]);
     expect(fakes.worktrees.created.map((worktree) => worktree.branch)).toEqual([
@@ -285,6 +291,7 @@ describe("built-in workflows", () => {
     expect(new Set(fakes.worktrees.created.map((worktree) => worktree.path)).size).toBe(2);
     expect(run.worktreePaths).toEqual(fakes.worktrees.created.map((worktree) => worktree.path));
     expect(fakes.adapter.cwdByJob.get("attempt-1")).toBe(fakes.worktrees.created[0]?.path);
+    expect(fakes.adapter.sandboxByJob.get("attempt-1")).toBe("workspace-write");
     expect(await readFile(join(fakes.worktrees.created[0]!.path, "attempt.txt"), "utf8")).toBe("attempt-1");
     expect(await readFile(join(fakes.worktrees.created[1]!.path, "attempt.txt"), "utf8")).toBe("attempt-2");
   });
@@ -305,6 +312,19 @@ describe("built-in workflows", () => {
       "tournament-ranking"
     ]));
     expect(run.jobs.find((job) => job.id === "attempt-1")?.artifacts.map((artifact) => artifact.id)).toEqual(expect.arrayContaining(["attempt-1-raw", "attempt-1-state"]));
+  });
+
+  it("does not create tournament worktrees when inspect mode is requested explicitly", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-packs-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const fakes = tournamentFakes(dir);
+    const result = await new WorkflowRuntime(store).run(createTournamentWorkflow(fakes.dependencies), { repo: dir, attempts: 2 }, { mode: "inspect" });
+    const run = await store.getRun(result.runId);
+
+    expect(run.state).toBe("failed");
+    expect(result.results[0]).toEqual(expect.objectContaining({ phaseId: "permission-check", state: "failed" }));
+    expect(fakes.worktrees.created).toHaveLength(0);
   });
 
   it("records failed tournament attempts and continues ranking later candidates", async () => {

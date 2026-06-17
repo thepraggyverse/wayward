@@ -78,6 +78,8 @@ const REVIEWERS: ReviewerDefinition[] = [
   }
 ];
 
+const DEFAULT_REVIEW_TIMEOUT_MS = 600_000;
+
 export function createUltrareviewWorkflow(dependencies: UltrareviewWorkflowDependencies = {}): WorkflowDefinition {
   return {
     name: "ultrareview",
@@ -91,7 +93,7 @@ export function createUltrareviewWorkflow(dependencies: UltrareviewWorkflowDepen
         }),
         async run(input: UltrareviewInput, context) {
           const adapter = dependencies.adapterFactory?.(context.store) ?? new CodexAdapter(context.store);
-          const timeoutMs = input.timeoutMs ?? dependencies.timeoutMs;
+          const timeoutMs = input.timeoutMs ?? dependencies.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
           const reviewers = await runWithConcurrency(REVIEWERS, 2, async (reviewer) => runReviewer({ adapter, context, input, reviewer, timeoutMs }));
           return { repo: input.repo, reviewers };
         }
@@ -218,9 +220,9 @@ async function normalizeReviewerOutput(path: string): Promise<{ summary: string;
     const parsed = parseReviewerJson(candidate);
     if (parsed) return parsed;
   }
-  const text = candidates.at(-1) ?? raw.trim();
+  const text = candidates.at(-1);
   return {
-    summary: text.trim() || "Reviewer completed without a parseable final message.",
+    summary: text?.trim() || "Reviewer completed without a parseable final message.",
     findings: []
   };
 }
