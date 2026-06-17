@@ -22,7 +22,7 @@ Wayward coordinates coding agents through a runtime, not through one-off shell c
 4. Every durable fact is written to the local run store.
 5. `wayward board`, `wayward run show`, `readRun`, and `readReport` inspect the persisted store instead of relying on live process memory.
 
-This lets completed, failed, cancelled, approval-blocked, and rewound runs remain inspectable after the original worker process exits.
+This lets completed, failed, cancelled, interrupted, approval-blocked, and rewound runs remain inspectable after the original worker process exits.
 
 ## Local State Layout
 

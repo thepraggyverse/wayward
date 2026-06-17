@@ -169,6 +169,43 @@ describe("CLI commands", () => {
     expect(await boardCommand(["--state", "failed"], store)).toContain("latest failure: run.state_changed: ranking failed");
   });
 
+  it("recovers stale running runs and renders the interrupted state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-cli-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const run = await store.createRun({ workflowName: "ultrareview", inputs: { repo: dir } });
+    await store.setRunState(run.id, "running");
+    await store.upsertJob(run.id, { id: "reviewer-tests", adapter: "codex", state: "running", startedAt: "2026-06-18T00:00:00.000Z" });
+    await store.recordRunRuntime(run.id, {
+      pid: 4242,
+      hostname: "local-host",
+      startedAt: "2026-06-18T00:00:00.000Z",
+      heartbeatAt: "2026-06-18T00:00:00.000Z",
+      heartbeatIntervalMs: 15_000
+    });
+
+    const recovered = JSON.parse(await runCommand(["recover-stale", "--stale-after-ms", "1000"], store, {
+      recoveryNow: new Date("2026-06-18T01:00:00.000Z"),
+      recoveryHostname: "local-host",
+      recoveredByPid: 77,
+      isProcessAlive: () => false
+    })) as { recovered: Array<{ runId: string; state: string }> };
+    const board = await boardCommand(["--state", "interrupted"], store);
+    const detail = await runCommand(["show", run.id], store);
+
+    expect(recovered.recovered).toEqual([
+      expect.objectContaining({ runId: run.id, state: "interrupted" })
+    ]);
+    expect(board).toContain(`run: ${run.id}`);
+    expect(board).toContain("state: interrupted [INTERRUPTED]");
+    expect(board).toContain("recovery: 2026-06-18T01:00:00.000Z Recovered stale running run");
+    expect(board).toContain("latest failure: run.recovered: Recovered stale running run");
+    expect(detail).toContain("state: interrupted [INTERRUPTED]");
+    expect(detail).toContain('"recoveredAt":"2026-06-18T01:00:00.000Z"');
+    expect(detail).toContain("id=reviewer-tests state=failed adapter=codex");
+    expect(detail).toContain("run.recovered");
+  });
+
   it("renders run detail with jobs, reports, approvals, artifacts, checkpoints, worktrees, and recent events", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wayward-cli-"));
     tempDirs.push(dir);

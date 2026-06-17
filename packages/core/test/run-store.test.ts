@@ -45,6 +45,84 @@ describe("FileRunStore", () => {
     expect(reloaded.jobs.map((job) => job.state)).toEqual(["failed", "timed_out", "cancelled"]);
   });
 
+  it("does not recover a running run while its recorded process is still alive", async () => {
+    const store = await tempStore();
+    const run = await store.createRun({ workflowName: "ultrareview" });
+    await store.setRunState(run.id, "running");
+    await store.recordRunRuntime(run.id, {
+      pid: 4242,
+      hostname: "local-host",
+      startedAt: "2026-06-18T00:00:00.000Z",
+      heartbeatAt: "2026-06-18T00:00:00.000Z",
+      heartbeatIntervalMs: 15_000
+    });
+
+    const result = await store.recoverStaleRunningRuns({
+      staleAfterMs: 1_000,
+      now: new Date("2026-06-18T01:00:00.000Z"),
+      hostname: "local-host",
+      isProcessAlive: (pid) => pid === 4242
+    });
+    const reloaded = await store.getRun(run.id);
+
+    expect(result.recovered).toEqual([]);
+    expect(result.skipped).toEqual([
+      expect.objectContaining({ runId: run.id, state: "running", reason: "runtime pid 4242 is still alive on local-host" })
+    ]);
+    expect(reloaded.state).toBe("running");
+    expect(reloaded.runtime?.pid).toBe(4242);
+  });
+
+  it("marks stale running runs as interrupted and records recovery metadata", async () => {
+    const store = await tempStore();
+    const run = await store.createRun({ workflowName: "ultrareview" });
+    await store.setRunState(run.id, "running");
+    await store.upsertJob(run.id, { id: "reviewer-correctness", adapter: "codex", state: "running" });
+    await store.recordRunRuntime(run.id, {
+      pid: 4242,
+      hostname: "local-host",
+      startedAt: "2026-06-18T00:00:00.000Z",
+      heartbeatAt: "2026-06-18T00:00:00.000Z",
+      heartbeatIntervalMs: 15_000
+    });
+
+    const result = await store.recoverStaleRunningRuns({
+      staleAfterMs: 1_000,
+      now: new Date("2026-06-18T01:00:00.000Z"),
+      hostname: "local-host",
+      recoveredByPid: 77,
+      isProcessAlive: () => false
+    });
+    const reloaded = await store.getRun(run.id);
+    const events = await store.readEvents(run.id);
+
+    expect(result.recovered).toEqual([
+      expect.objectContaining({
+        runId: run.id,
+        state: "interrupted",
+        lastActivityAt: "2026-06-18T00:00:00.000Z",
+        staleMs: 3_600_000
+      })
+    ]);
+    expect(reloaded.state).toBe("interrupted");
+    expect(reloaded.runtime).toBeUndefined();
+    expect(reloaded.recovery).toMatchObject({
+      previousState: "running",
+      recoveredAt: "2026-06-18T01:00:00.000Z",
+      staleAfterMs: 1_000,
+      lastHeartbeatAt: "2026-06-18T00:00:00.000Z",
+      recoveredBy: { pid: 77, hostname: "local-host" }
+    });
+    expect(reloaded.jobs[0]).toMatchObject({
+      id: "reviewer-correctness",
+      state: "failed",
+      finishedAt: "2026-06-18T01:00:00.000Z"
+    });
+    expect(reloaded.jobs[0]?.error).toContain("Recovered stale running run");
+    expect(events.map((event) => event.type)).toContain("run.recovered");
+    expect(events.at(-1)?.payload).toMatchObject({ state: "interrupted", previousState: "running" });
+  });
+
   it("serializes concurrent summary mutations for the same run", async () => {
     const store = await tempStore();
     const run = await store.createRun({ workflowName: "fanout" });

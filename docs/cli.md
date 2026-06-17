@@ -36,7 +36,7 @@ Supported built-in workflows are `ultrareview`, `open-pr-audit`, and `tournament
 
 ### `wayward board`
 
-Renders persisted runs as a terminal-friendly control surface. It shows run id, workflow, state label, mode, created and updated time, job counts by state, report count, pending approval count, checkpoint count, worktree count, and the latest failure or error summary.
+Renders persisted runs as a terminal-friendly control surface. It shows run id, workflow, state label, mode, created and updated time, runtime/recovery metadata, job counts by state, report count, pending approval count, checkpoint count, worktree count, and the latest failure or error summary.
 
 ```sh
 wayward board
@@ -47,7 +47,7 @@ wayward board --limit 5
 
 Options:
 
-- `--state <state>`: one of `created`, `running`, `needs_approval`, `completed`, `failed`, `timed_out`, `cancelled`, or `rewound`.
+- `--state <state>`: one of `created`, `running`, `needs_approval`, `completed`, `failed`, `timed_out`, `cancelled`, `rewound`, or `interrupted`.
 - `--workflow <name>`: filter by workflow name.
 - `--limit <count>`: limit rendered runs after filtering.
 
@@ -60,6 +60,24 @@ wayward run show run_123
 ```
 
 Use this before acting on an approval gate, choosing a tournament winner, or rewinding from a checkpoint.
+
+### `wayward run recover-stale`
+
+Recovers persisted `running` runs whose recorded heartbeat or last update is older than a conservative stale threshold. Recovery marks the run `interrupted`, records recovery metadata, clears runtime metadata, and marks still-running or queued jobs as failed with an interruption reason.
+
+```sh
+wayward run recover-stale
+wayward run recover-stale --repo .
+wayward run recover-stale --stale-after-ms 3600000
+wayward run recover-stale --run-id run_123
+```
+
+Options:
+
+- `--repo <path>`: target repository whose `.wayward/runs/` store should be inspected. Defaults to the invocation working directory.
+- `--stale-after-ms <ms>`: age threshold for the latest heartbeat or update. Defaults to one hour.
+- `--run-id <run-id>`: inspect only one run.
+- `--include-foreign-hosts`: allow recovery of runs recorded from another hostname. By default, those are skipped because Wayward cannot prove their process is dead.
 
 ### `wayward approvals`
 
@@ -115,9 +133,9 @@ Options:
 
 ## Run States
 
-Runs can be `created`, `running`, `needs_approval`, `completed`, `failed`, `timed_out`, `cancelled`, or `rewound`.
+Runs can be `created`, `running`, `needs_approval`, `completed`, `failed`, `timed_out`, `cancelled`, `rewound`, or `interrupted`.
 
-`needs_approval` means the workflow reached a local approval gate and is waiting for a decision. `rewound` means a checkpoint restore was recorded for the run.
+`needs_approval` means the workflow reached a local approval gate and is waiting for a decision. `rewound` means a checkpoint restore was recorded for the run. `interrupted` means a previously running summary was recovered after its process stopped heartbeating and was no longer considered active.
 
 ## Source-First Invocation
 

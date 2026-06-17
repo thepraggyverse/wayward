@@ -1,6 +1,8 @@
 export type WaywardEventType =
   | "run.created"
   | "run.state_changed"
+  | "run.runtime_started"
+  | "run.recovered"
   | "phase.started"
   | "phase.completed"
   | "job.event"

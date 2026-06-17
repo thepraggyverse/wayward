@@ -30,6 +30,8 @@ A run can include:
 - Approval gates and decisions.
 - Checkpoints.
 - Worktrees created for tournament attempts or checkpoint branches.
+- Runtime heartbeat metadata for active runs.
+- Recovery metadata when stale running state is marked interrupted.
 
 ## States
 
@@ -43,5 +45,10 @@ Run states are first-class:
 - `timed_out`
 - `cancelled`
 - `rewound`
+- `interrupted`
 
-`needs_approval` means a local approval gate is pending. `rewound` means a checkpoint restore was recorded. Historical events and artifacts remain inspectable after either state transition.
+`needs_approval` means a local approval gate is pending. `rewound` means a checkpoint restore was recorded. `interrupted` means a run that was still marked `running` was recovered after its heartbeat or last update became stale and Wayward did not consider the recorded process active. Historical events and artifacts remain inspectable after any of these state transitions.
+
+## Stale Running Recovery
+
+New runs record process metadata and heartbeat timestamps in `summary.json`. `wayward run recover-stale` checks only `running` runs, skips same-host runs whose recorded PID is still alive, and skips other-host runs unless explicitly allowed. Runs that pass the stale threshold are moved to `interrupted`, with recovery details stored on the summary and a `run.recovered` event appended to the event log.

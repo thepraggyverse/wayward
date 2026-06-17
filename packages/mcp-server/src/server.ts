@@ -38,7 +38,7 @@ export const WAYWARD_MCP_TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         workflow: { type: "string" },
-        state: { type: "string", enum: ["created", "running", "needs_approval", "completed", "failed", "timed_out", "cancelled", "rewound"] },
+        state: { type: "string", enum: ["created", "running", "needs_approval", "completed", "failed", "timed_out", "cancelled", "rewound", "interrupted"] },
         limit: { type: "integer", minimum: 1 }
       }
     }
@@ -471,7 +471,7 @@ function optionalPermissionMode(record: Record<string, unknown>, field: string, 
 function optionalRunState(record: Record<string, unknown>, field: string, toolName: string): RunState | undefined {
   const value = record[field];
   if (value === undefined) return undefined;
-  if (value === "created" || value === "running" || value === "needs_approval" || value === "completed" || value === "failed" || value === "timed_out" || value === "cancelled" || value === "rewound") return value;
+  if (value === "created" || value === "running" || value === "needs_approval" || value === "completed" || value === "failed" || value === "timed_out" || value === "cancelled" || value === "rewound" || value === "interrupted") return value;
   throw new WaywardMcpUserError(`${toolName}.${field} must be a known Wayward run state when provided.`);
 }
 

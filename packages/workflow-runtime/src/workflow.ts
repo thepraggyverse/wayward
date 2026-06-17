@@ -1,4 +1,4 @@
-import { createId, type FileRunStore, type PermissionMode } from "@thepraggyverse/core";
+import { createId, DEFAULT_HEARTBEAT_INTERVAL_MS, type FileRunStore, type PermissionMode } from "@thepraggyverse/core";
 import type { PhaseDefinition, PhaseResult } from "./phases.js";
 
 export interface WorkflowDefinition {
@@ -26,44 +26,58 @@ export class WorkflowRuntime {
       return { runId: run.id, results: [result] };
     }
     await this.store.setRunState(run.id, "running");
+    await this.store.recordRunRuntime(run.id);
+    const stopHeartbeat = this.startHeartbeat(run.id);
     const results: PhaseResult[] = [];
     let current: unknown = input;
-    for (const phase of workflow.phases) {
-      try {
-        const parsedInput = phase.inputSchema ? phase.inputSchema.parse(current) : current;
-        const output = await phase.run(parsedInput, {
-          runId: run.id,
-          store: this.store,
-          emitArtifact: async (kind, content) => {
-            const artifact = await this.store.writeArtifact(run.id, { id: createId(phase.id), kind }, content);
-            return artifact.id;
-          }
-        });
-        const parsedOutput = phase.outputSchema ? phase.outputSchema.parse(output) : output;
-        results.push({ phaseId: phase.id, kind: phase.kind, state: "completed", output: parsedOutput });
-        current = parsedOutput;
-        if (phase.kind === "gate") {
-          const report = await this.store.writeReport(run.id, `${workflow.name} report`, renderReport(workflow.name, results));
-          await this.store.addApproval(run.id, {
-            id: createId("approval"),
-            requestedAction: phase.id,
-            evidence: [report.id],
-            state: "pending"
+    try {
+      for (const phase of workflow.phases) {
+        try {
+          const parsedInput = phase.inputSchema ? phase.inputSchema.parse(current) : current;
+          const output = await phase.run(parsedInput, {
+            runId: run.id,
+            store: this.store,
+            emitArtifact: async (kind, content) => {
+              const artifact = await this.store.writeArtifact(run.id, { id: createId(phase.id), kind }, content);
+              return artifact.id;
+            }
           });
-          return { runId: run.id, results };
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        results.push({ phaseId: phase.id, kind: phase.kind, state: phase.policy === "optional" ? "skipped" : "failed", error: message });
-        if (phase.policy !== "optional") {
-          await this.store.setRunState(run.id, "failed", { phaseId: phase.id, error: message });
-          return { runId: run.id, results };
+          const parsedOutput = phase.outputSchema ? phase.outputSchema.parse(output) : output;
+          results.push({ phaseId: phase.id, kind: phase.kind, state: "completed", output: parsedOutput });
+          current = parsedOutput;
+          if (phase.kind === "gate") {
+            const report = await this.store.writeReport(run.id, `${workflow.name} report`, renderReport(workflow.name, results));
+            await this.store.addApproval(run.id, {
+              id: createId("approval"),
+              requestedAction: phase.id,
+              evidence: [report.id],
+              state: "pending"
+            });
+            return { runId: run.id, results };
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          results.push({ phaseId: phase.id, kind: phase.kind, state: phase.policy === "optional" ? "skipped" : "failed", error: message });
+          if (phase.policy !== "optional") {
+            await this.store.setRunState(run.id, "failed", { phaseId: phase.id, error: message });
+            return { runId: run.id, results };
+          }
         }
       }
+      await this.store.writeReport(run.id, `${workflow.name} report`, renderReport(workflow.name, results));
+      await this.store.setRunState(run.id, "completed");
+      return { runId: run.id, results };
+    } finally {
+      stopHeartbeat();
     }
-    await this.store.writeReport(run.id, `${workflow.name} report`, renderReport(workflow.name, results));
-    await this.store.setRunState(run.id, "completed");
-    return { runId: run.id, results };
+  }
+
+  private startHeartbeat(runId: string): () => void {
+    const timer = setInterval(() => {
+      void this.store.recordRunHeartbeat(runId).catch(() => undefined);
+    }, DEFAULT_HEARTBEAT_INTERVAL_MS);
+    timer.unref?.();
+    return () => clearInterval(timer);
   }
 }
 
