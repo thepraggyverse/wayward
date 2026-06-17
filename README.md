@@ -85,6 +85,7 @@ The public command shape is:
 
 ```bash
 wayward run <workflow> --repo <repo-path>
+wayward run recover-stale [--repo <repo-path>] [--stale-after-ms <ms>]
 wayward board [--state <state>] [--workflow <name>] [--limit <count>]
 wayward run show <run-id>
 wayward approvals list

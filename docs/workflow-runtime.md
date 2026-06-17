@@ -13,6 +13,8 @@ A phase may:
 
 Phase inputs and outputs can declare schemas so downstream phases consume validated objects rather than freeform text. Failed validation becomes runtime state instead of an invisible prompt mismatch.
 
+While a workflow is `running`, the runtime records process metadata and periodic heartbeat timestamps in the run summary. These are used by `wayward run recover-stale` to distinguish likely active processes from interrupted summaries before marking a stale run `interrupted`.
+
 ## Permission Modes
 
 Runs record a permission mode:

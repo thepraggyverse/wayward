@@ -60,7 +60,7 @@ Lists persisted runs.
 Optional input:
 
 - `workflow`: filter by workflow name.
-- `state`: `created`, `running`, `needs_approval`, `completed`, `failed`, `timed_out`, `cancelled`, or `rewound`.
+- `state`: `created`, `running`, `needs_approval`, `completed`, `failed`, `timed_out`, `cancelled`, `rewound`, or `interrupted`.
 - `limit`: positive integer.
 
 ### `readRun`

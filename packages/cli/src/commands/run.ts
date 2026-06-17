@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { FileRunStore } from "@thepraggyverse/core";
+import { DEFAULT_STALE_RUN_AFTER_MS, FileRunStore } from "@thepraggyverse/core";
 import type { PermissionMode } from "@thepraggyverse/core";
 import { WorkflowRuntime } from "@thepraggyverse/workflow-runtime";
 import type { WorkflowDefinition } from "@thepraggyverse/workflow-runtime";
@@ -18,10 +18,15 @@ interface RunOptions {
 
 interface RunCommandDependencies {
   getWorkflow?: (name: string) => WorkflowDefinition;
+  recoveryNow?: Date;
+  recoveryHostname?: string;
+  recoveredByPid?: number;
+  isProcessAlive?: (pid: number) => boolean;
 }
 
 export async function runCommand(args: string[], store?: FileRunStore, dependencies: RunCommandDependencies = {}): Promise<string> {
   if (args[0] === "show") return runShowCommand(args.slice(1), store ?? new FileRunStore());
+  if (args[0] === "recover-stale") return recoverStaleRunsCommand(args.slice(1), store, dependencies);
   const workflowName = args[0] ?? "ultrareview";
   const options = parseRunOptions(args.slice(1));
   const workflow = (dependencies.getWorkflow ?? getWorkflow)(workflowName);
@@ -45,6 +50,21 @@ export async function runShowCommand(args: string[], store = new FileRunStore())
   const run = await store.getRun(runId);
   const events = await store.readEvents(runId);
   return renderRunDetail(run, events);
+}
+
+export async function recoverStaleRunsCommand(args: string[], store?: FileRunStore, dependencies: RunCommandDependencies = {}): Promise<string> {
+  const options = parseRecoverStaleOptions(args);
+  const runStore = store ?? new FileRunStore(runStoreRootForRepo(options.repo));
+  const result = await runStore.recoverStaleRunningRuns({
+    staleAfterMs: options.staleAfterMs,
+    runId: options.runId,
+    includeForeignHosts: options.includeForeignHosts,
+    now: dependencies.recoveryNow,
+    hostname: dependencies.recoveryHostname,
+    recoveredByPid: dependencies.recoveredByPid,
+    isProcessAlive: dependencies.isProcessAlive
+  });
+  return JSON.stringify(result, null, 2);
 }
 
 export function runStoreRootForRepo(repo: string): string {
@@ -101,4 +121,44 @@ function parseRunOptions(args: string[]): RunOptions {
     throw new Error(`Unknown run option ${arg}`);
   }
   return { repo, attempts, baseRef, prompt, mode, timeoutMs };
+}
+
+function parseRecoverStaleOptions(args: string[]): {
+  repo: string;
+  staleAfterMs: number;
+  runId?: string;
+  includeForeignHosts: boolean;
+} {
+  let repo = invocationCwd();
+  let staleAfterMs = DEFAULT_STALE_RUN_AFTER_MS;
+  let runId: string | undefined;
+  let includeForeignHosts = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--repo") {
+      const value = args[++index];
+      if (!value) throw new Error("Usage: wayward run recover-stale --repo <path>");
+      repo = resolveFromInvocationCwd(value);
+      continue;
+    }
+    if (arg === "--stale-after-ms") {
+      const value = args[++index];
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed < 1) throw new Error("Usage: wayward run recover-stale --stale-after-ms <positive-integer>");
+      staleAfterMs = parsed;
+      continue;
+    }
+    if (arg === "--run-id") {
+      const value = args[++index];
+      if (!value) throw new Error("Usage: wayward run recover-stale --run-id <run-id>");
+      runId = value;
+      continue;
+    }
+    if (arg === "--include-foreign-hosts") {
+      includeForeignHosts = true;
+      continue;
+    }
+    throw new Error(`Unknown recover-stale option ${arg}`);
+  }
+  return { repo, staleAfterMs, runId, includeForeignHosts };
 }

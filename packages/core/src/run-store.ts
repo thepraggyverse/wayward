@@ -1,8 +1,47 @@
 import { mkdir, readFile, readdir, writeFile, appendFile, rename } from "node:fs/promises";
+import { hostname as osHostname } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { createEvent, type WaywardEvent } from "./events.js";
 import { createId } from "./ids.js";
-import type { AgentJob, ApprovalDecision, ArtifactRef, CheckpointRecord, CreateRunInput, JobState, ReportRecord, RunState, RunSummary } from "./types.js";
+import type { AgentJob, ApprovalDecision, ArtifactRef, CheckpointRecord, CreateRunInput, JobState, ReportRecord, RunRecoveryMetadata, RunRuntimeMetadata, RunState, RunSummary } from "./types.js";
+
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+export const DEFAULT_STALE_RUN_AFTER_MS = 60 * 60 * 1000;
+
+export interface RecoverStaleRunsOptions {
+  staleAfterMs?: number;
+  now?: Date;
+  runId?: string;
+  includeForeignHosts?: boolean;
+  hostname?: string;
+  recoveredByPid?: number;
+  isProcessAlive?: (pid: number) => boolean;
+}
+
+export interface RecoveredStaleRun {
+  runId: string;
+  workflowName: string;
+  previousState: "running";
+  state: "interrupted";
+  reason: string;
+  staleMs: number;
+  lastActivityAt: string;
+  lastHeartbeatAt?: string;
+  runtime?: RunRuntimeMetadata;
+}
+
+export interface SkippedStaleRun {
+  runId: string;
+  state: RunState;
+  reason: string;
+}
+
+export interface RecoverStaleRunsResult {
+  recovered: RecoveredStaleRun[];
+  skipped: SkippedStaleRun[];
+  staleAfterMs: number;
+  now: string;
+}
 
 export class FileRunStore {
   private readonly locks = new Map<string, Promise<unknown>>();
@@ -63,11 +102,131 @@ export class FileRunStore {
     return this.withRunLock(runId, async () => {
       const run = await this.getRun(runId);
       run.state = state;
+      if (state !== "running") delete run.runtime;
       run.updatedAt = new Date().toISOString();
       await this.writeSummary(run);
       await this.appendEvent(runId, createEvent(runId, "run.state_changed", { state, ...payload }));
       return run;
     });
+  }
+
+  async recordRunRuntime(runId: string, runtime: RunRuntimeMetadata = createRunRuntimeMetadata()): Promise<RunSummary> {
+    return this.withRunLock(runId, async () => {
+      const run = await this.getRun(runId);
+      run.runtime = runtime;
+      run.updatedAt = new Date().toISOString();
+      await this.writeSummary(run);
+      await this.appendEvent(runId, createEvent(runId, "run.runtime_started", {
+        pid: runtime.pid,
+        hostname: runtime.hostname,
+        startedAt: runtime.startedAt,
+        heartbeatAt: runtime.heartbeatAt,
+        heartbeatIntervalMs: runtime.heartbeatIntervalMs
+      }));
+      return run;
+    });
+  }
+
+  async recordRunHeartbeat(runId: string, heartbeatAt = new Date()): Promise<RunSummary> {
+    return this.withRunLock(runId, async () => {
+      const run = await this.getRun(runId);
+      if (run.state !== "running" || !run.runtime) return run;
+      run.runtime = { ...run.runtime, heartbeatAt: heartbeatAt.toISOString() };
+      await this.writeSummary(run);
+      return run;
+    });
+  }
+
+  async recoverStaleRunningRuns(options: RecoverStaleRunsOptions = {}): Promise<RecoverStaleRunsResult> {
+    const staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_RUN_AFTER_MS;
+    if (!Number.isInteger(staleAfterMs) || staleAfterMs < 1) {
+      throw new Error("staleAfterMs must be a positive integer.");
+    }
+    const now = options.now ?? new Date();
+    const hostname = options.hostname ?? osHostname();
+    const recoveredByPid = options.recoveredByPid ?? process.pid;
+    const isProcessAlive = options.isProcessAlive ?? defaultIsProcessAlive;
+    const candidates = options.runId ? [await this.getRun(options.runId)] : await this.listRuns();
+    const recovered: RecoveredStaleRun[] = [];
+    const skipped: SkippedStaleRun[] = [];
+
+    for (const candidate of candidates) {
+      await this.withRunLock(candidate.id, async () => {
+        const run = await this.getRun(candidate.id);
+        const assessment = assessStaleRun(run, {
+          now,
+          staleAfterMs,
+          hostname,
+          includeForeignHosts: options.includeForeignHosts ?? false,
+          isProcessAlive
+        });
+        if (!assessment.recover) {
+          skipped.push({ runId: run.id, state: run.state, reason: assessment.reason });
+          return;
+        }
+
+        const previousRuntime = run.runtime;
+        const recoveredAt = now.toISOString();
+        const reason = `Recovered stale running run after ${assessment.staleMs}ms without activity.`;
+        const recovery: RunRecoveryMetadata = {
+          previousState: "running",
+          recoveredAt,
+          reason,
+          staleAfterMs,
+          lastActivityAt: assessment.lastActivityAt,
+          ...(previousRuntime?.heartbeatAt ? { lastHeartbeatAt: previousRuntime.heartbeatAt } : {}),
+          ...(previousRuntime ? { runtime: previousRuntime } : {}),
+          recoveredBy: {
+            pid: recoveredByPid,
+            hostname
+          }
+        };
+
+        run.state = "interrupted";
+        run.recovery = recovery;
+        run.updatedAt = recoveredAt;
+        delete run.runtime;
+        for (const job of run.jobs) {
+          if (job.state === "running" || job.state === "queued") {
+            job.state = "failed";
+            job.error = job.error ?? reason;
+            job.finishedAt = recoveredAt;
+          }
+        }
+        await this.writeSummary(run);
+        await this.appendEvent(run.id, createEvent(run.id, "run.state_changed", {
+          state: "interrupted",
+          previousState: "running",
+          reason,
+          error: reason
+        }));
+        await this.appendEvent(run.id, createEvent(run.id, "run.recovered", {
+          state: "interrupted",
+          previousState: "running",
+          reason,
+          error: reason,
+          staleAfterMs,
+          staleMs: assessment.staleMs,
+          lastActivityAt: assessment.lastActivityAt,
+          ...(previousRuntime?.heartbeatAt ? { lastHeartbeatAt: previousRuntime.heartbeatAt } : {}),
+          ...(previousRuntime ? { runtime: previousRuntime } : {}),
+          recoveredBy: recovery.recoveredBy
+        }));
+        recovered.push({
+          runId: run.id,
+          workflowName: run.workflowName,
+          previousState: "running",
+          state: "interrupted",
+          reason,
+          staleMs: assessment.staleMs,
+          lastActivityAt: assessment.lastActivityAt,
+          ...(previousRuntime?.heartbeatAt ? { lastHeartbeatAt: previousRuntime.heartbeatAt } : {}),
+          ...(previousRuntime ? { runtime: previousRuntime } : {})
+        });
+      });
+    }
+
+    return { recovered, skipped, staleAfterMs, now: now.toISOString() };
   }
 
   async upsertJob(runId: string, job: Omit<AgentJob, "artifacts"> & { artifacts?: ArtifactRef[] }): Promise<AgentJob> {
@@ -139,6 +298,7 @@ export class FileRunStore {
       const run = await this.getRun(runId);
       run.approvals.push(approval);
       run.state = "needs_approval";
+      delete run.runtime;
       run.updatedAt = new Date().toISOString();
       await this.writeSummary(run);
       await this.appendEvent(runId, createEvent(runId, "approval.requested", { approvalId: approval.id, action: approval.requestedAction, evidence: approval.evidence }));
@@ -230,4 +390,54 @@ function defaultRunRoot(): string {
 
 function assertSafeId(value: string, label: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) throw new Error(`Unsafe ${label}: ${value}`);
+}
+
+function createRunRuntimeMetadata(now = new Date()): RunRuntimeMetadata {
+  const timestamp = now.toISOString();
+  return {
+    pid: process.pid,
+    hostname: osHostname(),
+    startedAt: timestamp,
+    heartbeatAt: timestamp,
+    heartbeatIntervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS
+  };
+}
+
+interface StaleRunAssessmentInput {
+  now: Date;
+  staleAfterMs: number;
+  hostname: string;
+  includeForeignHosts: boolean;
+  isProcessAlive: (pid: number) => boolean;
+}
+
+type StaleRunAssessment =
+  | { recover: true; staleMs: number; lastActivityAt: string }
+  | { recover: false; reason: string };
+
+function assessStaleRun(run: RunSummary, input: StaleRunAssessmentInput): StaleRunAssessment {
+  if (run.state !== "running") return { recover: false, reason: `state is ${run.state}` };
+  const lastActivityAt = run.runtime?.heartbeatAt ?? run.updatedAt;
+  const lastActivityTime = Date.parse(lastActivityAt);
+  if (!Number.isFinite(lastActivityTime)) return { recover: false, reason: `last activity timestamp is invalid: ${lastActivityAt}` };
+  const staleMs = input.now.getTime() - lastActivityTime;
+  if (staleMs < input.staleAfterMs) {
+    return { recover: false, reason: `last activity is ${Math.max(0, staleMs)}ms old, below stale threshold ${input.staleAfterMs}ms` };
+  }
+  if (run.runtime?.hostname && run.runtime.hostname !== input.hostname && !input.includeForeignHosts) {
+    return { recover: false, reason: `runtime belongs to host ${run.runtime.hostname}; pass includeForeignHosts to recover from ${input.hostname}` };
+  }
+  if (run.runtime?.hostname === input.hostname && Number.isInteger(run.runtime.pid) && run.runtime.pid > 0 && input.isProcessAlive(run.runtime.pid)) {
+    return { recover: false, reason: `runtime pid ${run.runtime.pid} is still alive on ${input.hostname}` };
+  }
+  return { recover: true, staleMs, lastActivityAt };
+}
+
+function defaultIsProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }

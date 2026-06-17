@@ -2,7 +2,7 @@ import { FileRunStore } from "@thepraggyverse/core";
 import type { RunState } from "@thepraggyverse/core";
 import { latestFailureSummary, renderBoard } from "./run-rendering.js";
 
-const RUN_STATES: RunState[] = ["created", "running", "needs_approval", "completed", "failed", "timed_out", "cancelled", "rewound"];
+const RUN_STATES: RunState[] = ["created", "running", "needs_approval", "completed", "failed", "timed_out", "cancelled", "rewound", "interrupted"];
 
 export async function boardCommand(args: string[] = [], store = new FileRunStore()): Promise<string> {
   const options = parseBoardOptions(args);

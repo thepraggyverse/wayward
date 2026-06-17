@@ -1,5 +1,5 @@
 export type PermissionMode = "inspect" | "worktree-write" | "autopilot";
-export type RunState = "created" | "running" | "needs_approval" | "completed" | "failed" | "timed_out" | "cancelled" | "rewound";
+export type RunState = "created" | "running" | "needs_approval" | "completed" | "failed" | "timed_out" | "cancelled" | "rewound" | "interrupted";
 export type JobState = "queued" | "running" | "completed" | "failed" | "timed_out" | "cancelled";
 export type ApprovalState = "pending" | "approved" | "rejected";
 
@@ -47,6 +47,28 @@ export interface ReportRecord {
   createdAt: string;
 }
 
+export interface RunRuntimeMetadata {
+  pid: number;
+  hostname: string;
+  startedAt: string;
+  heartbeatAt: string;
+  heartbeatIntervalMs: number;
+}
+
+export interface RunRecoveryMetadata {
+  previousState: "running";
+  recoveredAt: string;
+  reason: string;
+  staleAfterMs: number;
+  lastActivityAt: string;
+  lastHeartbeatAt?: string;
+  runtime?: RunRuntimeMetadata;
+  recoveredBy: {
+    pid: number;
+    hostname: string;
+  };
+}
+
 export interface RunSummary {
   id: string;
   workflowName: string;
@@ -63,6 +85,8 @@ export interface RunSummary {
   checkpoints: CheckpointRecord[];
   reports: ReportRecord[];
   skipped: string[];
+  runtime?: RunRuntimeMetadata;
+  recovery?: RunRecoveryMetadata;
 }
 
 export interface CreateRunInput {

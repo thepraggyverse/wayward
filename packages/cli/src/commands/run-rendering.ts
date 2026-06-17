@@ -21,7 +21,8 @@ const RUN_STATE_LABELS: Record<RunState, string> = {
   failed: "FAILED",
   timed_out: "TIMED OUT",
   cancelled: "CANCELLED",
-  rewound: "REWOUND"
+  rewound: "REWOUND",
+  interrupted: "INTERRUPTED"
 };
 
 export function renderBoard(runs: BoardRun[], options: BoardRenderOptions = {}): string {
@@ -38,6 +39,8 @@ export function renderBoard(runs: BoardRun[], options: BoardRenderOptions = {}):
       `mode: ${run.mode}`,
       `created: ${run.createdAt}`,
       `updated: ${run.updatedAt}`,
+      `runtime: ${formatRuntime(run)}`,
+      `recovery: ${formatRecovery(run)}`,
       `jobs: ${formatJobCounts(run.jobs)}`,
       `reports: ${run.reports.length}`,
       `pending approvals: ${pendingApprovalCount(run)}`,
@@ -59,6 +62,8 @@ export function renderRunDetail(run: RunSummary, events: WaywardEvent[]): string
     `adapter: ${run.adapter}`,
     `created: ${run.createdAt}`,
     `updated: ${run.updatedAt}`,
+    `runtime: ${run.runtime ? stableJson(run.runtime) : "-"}`,
+    `recovery: ${run.recovery ? stableJson(run.recovery) : "-"}`,
     `inputs: ${stableJson(run.inputs)}`,
     `skipped: ${run.skipped.length ? run.skipped.join(",") : "-"}`,
     "",
@@ -101,7 +106,7 @@ export function latestFailureSummary(run: RunSummary, events: WaywardEvent[]): s
     const error = failedJob.error ? `: ${singleLine(failedJob.error)}` : "";
     return `job ${failedJob.id}: ${failedJob.state}${error}`;
   }
-  if (isTerminalProblemState(run.state)) return `run ${run.state}`;
+  if (isTerminalProblemState(run.state)) return run.recovery?.reason ?? `run ${run.state}`;
   return undefined;
 }
 
@@ -117,6 +122,16 @@ function formatJobCounts(jobs: AgentJob[]): string {
   const counts = new Map<JobState, number>(JOB_STATE_ORDER.map((state) => [state, 0]));
   for (const job of jobs) counts.set(job.state, (counts.get(job.state) ?? 0) + 1);
   return JOB_STATE_ORDER.map((state) => `${state}=${counts.get(state) ?? 0}`).join(" ");
+}
+
+function formatRuntime(run: RunSummary): string {
+  if (!run.runtime) return "-";
+  return `pid=${run.runtime.pid} host=${run.runtime.hostname} heartbeat=${run.runtime.heartbeatAt}`;
+}
+
+function formatRecovery(run: RunSummary): string {
+  if (!run.recovery) return "-";
+  return `${run.recovery.recoveredAt} ${singleLine(run.recovery.reason)}`;
 }
 
 function formatJobs(jobs: AgentJob[]): string[] {
@@ -171,8 +186,8 @@ function withEventContext(event: WaywardEvent, summary: string): string {
   return `${parts.join(": ")}: ${summary}`;
 }
 
-function isTerminalProblemState(state: unknown): state is "failed" | "timed_out" | "cancelled" {
-  return state === "failed" || state === "timed_out" || state === "cancelled";
+function isTerminalProblemState(state: unknown): state is "failed" | "timed_out" | "cancelled" | "interrupted" {
+  return state === "failed" || state === "timed_out" || state === "cancelled" || state === "interrupted";
 }
 
 function stableJson(value: unknown): string {
