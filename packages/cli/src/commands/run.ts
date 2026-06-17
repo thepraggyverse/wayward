@@ -3,8 +3,10 @@ import type { PermissionMode } from "@thepraggyverse/core";
 import { WorkflowRuntime } from "@thepraggyverse/workflow-runtime";
 import { getWorkflow } from "@thepraggyverse/workflows";
 import { resolve } from "node:path";
+import { renderRunDetail } from "./run-rendering.js";
 
 export async function runCommand(args: string[], store = new FileRunStore()): Promise<string> {
+  if (args[0] === "show") return runShowCommand(args.slice(1), store);
   const workflowName = args[0] ?? "ultrareview";
   const options = parseRunOptions(args.slice(1));
   const workflow = getWorkflow(workflowName);
@@ -19,6 +21,14 @@ export async function runCommand(args: string[], store = new FileRunStore()): Pr
   const mode = options.mode ?? (workflowName === "tournament" ? "worktree-write" : undefined);
   const result = await runtime.run(workflow, input, { mode });
   return JSON.stringify({ runId: result.runId, workflow: workflow.name, phases: result.results.length }, null, 2);
+}
+
+export async function runShowCommand(args: string[], store = new FileRunStore()): Promise<string> {
+  const [runId, ...extra] = args;
+  if (!runId || extra.length) throw new Error("Usage: wayward run show <run-id>");
+  const run = await store.getRun(runId);
+  const events = await store.readEvents(runId);
+  return renderRunDetail(run, events);
 }
 
 function parseRunOptions(args: string[]): { repo: string; attempts?: number; baseRef?: string; prompt?: string; mode?: PermissionMode } {

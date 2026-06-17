@@ -14,7 +14,7 @@ export async function main(argv = process.argv.slice(2)): Promise<string> {
   if (command === "run" || command === "ultrareview" || command === "open-pr-audit" || command === "pr-audit" || command === "tournament") {
     return runCommand(command === "run" ? args : [command, ...args]);
   }
-  if (command === "board") return boardCommand();
+  if (command === "board") return boardCommand(args);
   if (command === "checkpoints") return checkpointsCommand(args);
   if (command === "rewind") return rewindCommand(args);
   if (command === "branch") return branchCommand(args);
