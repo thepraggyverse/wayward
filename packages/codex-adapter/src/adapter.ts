@@ -5,6 +5,7 @@ export class CodexAdapter {
   constructor(private readonly store: FileRunStore, private readonly runner: CliRunner = new ProcessCliRunner()) {}
 
   async startExecJob(input: { runId: string; jobId: string; cwd: string; prompt: string; timeoutMs?: number }): Promise<JobState> {
+    const rawLines: string[] = [];
     await this.store.upsertJob(input.runId, {
       id: input.jobId,
       adapter: "codex",
@@ -12,7 +13,6 @@ export class CodexAdapter {
       startedAt: new Date().toISOString()
     });
     try {
-      const rawLines: string[] = [];
       const result = await this.runner.run("codex", ["exec", "--json", input.prompt], {
         cwd: input.cwd,
         timeoutMs: input.timeoutMs,
@@ -25,6 +25,8 @@ export class CodexAdapter {
       return state;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      rawLines.push(JSON.stringify({ stream: "adapter", error: message }));
+      await this.store.writeArtifact(input.runId, { id: `${input.jobId}-raw`, kind: "codex-jsonl", sourceJobId: input.jobId }, `${rawLines.join("\n")}\n`);
       await this.store.setJobState(input.runId, input.jobId, "failed", message);
       return "failed";
     }

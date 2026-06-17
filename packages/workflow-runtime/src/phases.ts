@@ -1,3 +1,4 @@
+import type { FileRunStore } from "@thepraggyverse/core";
 import type { Schema } from "./schemas.js";
 
 export type PhaseKind = "fanout" | "reduce" | "verify" | "synthesize" | "gate";
@@ -14,6 +15,7 @@ export interface PhaseDefinition<TInput = unknown, TOutput = unknown> {
 
 export interface PhaseContext {
   runId: string;
+  store: FileRunStore;
   emitArtifact(kind: string, content: string): Promise<string>;
 }
 

@@ -7,7 +7,9 @@
   "files": ["dist"],
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "dependencies": {
+    "@thepraggyverse/codex-adapter": "workspace:*",
     "@thepraggyverse/core": "workspace:*",
+    "@thepraggyverse/git-worktrees": "workspace:*",
     "@thepraggyverse/workflow-runtime": "workspace:*"
   }
 }

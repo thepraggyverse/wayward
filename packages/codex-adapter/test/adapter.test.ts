@@ -65,5 +65,6 @@ describe("CodexAdapter", () => {
 
     expect(state).toBe("failed");
     expect(reloaded.jobs[0]?.error).toBe("codex missing");
+    expect(reloaded.artifacts[0]).toMatchObject({ id: "job-1-raw", kind: "codex-jsonl", sourceJobId: "job-1" });
   });
 });

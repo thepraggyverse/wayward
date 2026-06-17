@@ -1,4 +1,4 @@
-import { createId, type FileRunStore } from "@thepraggyverse/core";
+import { createId, type FileRunStore, type PermissionMode } from "@thepraggyverse/core";
 import type { PhaseDefinition, PhaseResult } from "./phases.js";
 
 export interface WorkflowDefinition {
@@ -9,8 +9,12 @@ export interface WorkflowDefinition {
 export class WorkflowRuntime {
   constructor(private readonly store: FileRunStore) {}
 
-  async run(workflow: WorkflowDefinition, input: Record<string, unknown> = {}): Promise<{ runId: string; results: PhaseResult[] }> {
-    const run = await this.store.createRun({ workflowName: workflow.name, inputs: input });
+  async run(
+    workflow: WorkflowDefinition,
+    input: Record<string, unknown> = {},
+    options: { adapter?: string; mode?: PermissionMode } = {}
+  ): Promise<{ runId: string; results: PhaseResult[] }> {
+    const run = await this.store.createRun({ workflowName: workflow.name, inputs: input, adapter: options.adapter, mode: options.mode });
     await this.store.setRunState(run.id, "running");
     const results: PhaseResult[] = [];
     let current: unknown = input;
@@ -19,6 +23,7 @@ export class WorkflowRuntime {
         const parsedInput = phase.inputSchema ? phase.inputSchema.parse(current) : current;
         const output = await phase.run(parsedInput, {
           runId: run.id,
+          store: this.store,
           emitArtifact: async (kind, content) => {
             const artifact = await this.store.writeArtifact(run.id, { id: createId(phase.id), kind }, content);
             return artifact.id;

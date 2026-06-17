@@ -14,7 +14,7 @@ describe("Wayward MCP tools", () => {
     tempDirs.push(dir);
     const tools = createWaywardMcpTools(new FileRunStore(join(dir, "runs")));
 
-    const run = await tools.createRun({ workflow: "tournament", inputs: { attempts: 2 } });
+    const run = await tools.createRun({ workflow: "ultrareview", inputs: {} });
     const checkpoint = await tools.createCheckpoint({ runId: run.runId, label: "before", gitRef: "refs/test" });
     const approval = await tools.requestApproval({ runId: run.runId, requestedAction: "comment-on-pr", evidence: ["report"] });
 

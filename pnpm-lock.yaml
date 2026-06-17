@@ -88,9 +88,15 @@ importers:
 
   workflows:
     dependencies:
+      '@thepraggyverse/codex-adapter':
+        specifier: workspace:*
+        version: link:../packages/codex-adapter
       '@thepraggyverse/core':
         specifier: workspace:*
         version: link:../packages/core
+      '@thepraggyverse/git-worktrees':
+        specifier: workspace:*
+        version: link:../packages/git-worktrees
       '@thepraggyverse/workflow-runtime':
         specifier: workspace:*
         version: link:../packages/workflow-runtime
