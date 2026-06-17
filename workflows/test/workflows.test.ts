@@ -36,6 +36,12 @@ describe("built-in workflows", () => {
     expect(run.reports).toHaveLength(1);
     expect(run.approvals[0]?.requestedAction).toBe("external-action-gate");
     expect(run.approvals[0]?.evidence).toEqual([run.reports[0]?.id]);
+
+    const events = await store.readEvents(result.runId);
+    expect(events.find((event) => event.type === "approval.requested")?.payload).toMatchObject({
+      approvalId: run.approvals[0]?.id,
+      evidence: [run.reports[0]?.id]
+    });
   });
 
   it("tournament reports a winner with validation evidence", async () => {

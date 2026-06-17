@@ -22,5 +22,13 @@ describe("Wayward MCP tools", () => {
     expect(await tools.readReport({ runId: run.runId })).toBeTruthy();
     expect(checkpoint.gitRef).toBe("refs/test");
     expect(approval.state).toBe("pending");
+    expect(await tools.listPendingApprovals()).toEqual([
+      expect.objectContaining({ runId: run.runId, approvalId: approval.id, evidence: ["report"] })
+    ]);
+
+    const decision = await tools.decideApproval({ runId: run.runId, approvalId: approval.id, decision: "approved", actor: "tester" });
+    expect(decision.runState).toBe("completed");
+    expect(decision.approval).toMatchObject({ state: "approved", actor: "tester", evidence: ["report"] });
+    expect(await tools.listPendingApprovals()).toEqual([]);
   });
 });

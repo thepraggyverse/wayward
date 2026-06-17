@@ -32,6 +32,27 @@ export function createWaywardMcpTools(store = new FileRunStore()) {
       await store.addApproval(input.runId, approval);
       return approval;
     },
+    async listPendingApprovals() {
+      const runs = await store.listRuns();
+      return runs.flatMap((run) =>
+        run.approvals
+          .filter((approval) => approval.state === "pending")
+          .map((approval) => ({
+            runId: run.id,
+            workflow: run.workflowName,
+            runState: run.state,
+            approvalId: approval.id,
+            requestedAction: approval.requestedAction,
+            evidence: approval.evidence,
+            updatedAt: run.updatedAt
+          }))
+      );
+    },
+    async decideApproval(input: { runId: string; approvalId: string; decision: "approved" | "rejected"; actor?: string }) {
+      const approval = await store.decideApproval(input.runId, input.approvalId, input.decision, input.actor ?? "mcp-user");
+      const run = await store.getRun(input.runId);
+      return { runId: input.runId, runState: run.state, approval };
+    },
     async rewind(input: { repoPath: string; runId: string; checkpointId: string }) {
       await new RewindService(new RealGitClient(), store).rewind(input.repoPath, input.runId, input.checkpointId);
       return { runId: input.runId, checkpointId: input.checkpointId, state: "rewound" };

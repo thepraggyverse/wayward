@@ -63,4 +63,39 @@ describe("FileRunStore", () => {
     expect(reloaded.checkpoints).toHaveLength(1);
     expect(reloaded.approvals).toHaveLength(1);
   });
+
+  it("approving a pending gate records the decision and completes the run", async () => {
+    const store = await tempStore();
+    const run = await store.createRun({ workflowName: "open-pr-audit" });
+    await store.addApproval(run.id, { id: "approval-1", requestedAction: "external-action-gate", evidence: ["report-1"], state: "pending" });
+
+    const approval = await store.decideApproval(run.id, "approval-1", "approved", "tester");
+    const reloaded = await store.getRun(run.id);
+    const events = await store.readEvents(run.id);
+
+    expect(approval.state).toBe("approved");
+    expect(approval.evidence).toEqual(["report-1"]);
+    expect(reloaded.state).toBe("completed");
+    expect(reloaded.approvals[0]?.actor).toBe("tester");
+    expect(events.map((event) => event.type)).toEqual([
+      "run.created",
+      "approval.requested",
+      "run.state_changed",
+      "approval.decided",
+      "run.state_changed"
+    ]);
+    expect(events.at(-1)?.payload).toMatchObject({ state: "completed", decision: "approved" });
+  });
+
+  it("rejecting a pending gate records the decision and cancels the run", async () => {
+    const store = await tempStore();
+    const run = await store.createRun({ workflowName: "open-pr-audit" });
+    await store.addApproval(run.id, { id: "approval-1", requestedAction: "external-action-gate", evidence: ["report-1"], state: "pending" });
+
+    await store.decideApproval(run.id, "approval-1", "rejected", "tester");
+    const reloaded = await store.getRun(run.id);
+
+    expect(reloaded.state).toBe("cancelled");
+    expect(reloaded.approvals[0]).toMatchObject({ state: "rejected", actor: "tester", evidence: ["report-1"] });
+  });
 });

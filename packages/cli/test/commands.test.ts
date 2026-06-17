@@ -28,8 +28,24 @@ describe("CLI commands", () => {
     tempDirs.push(dir);
     const store = new FileRunStore(join(dir, "runs"));
     const run = await store.createRun({ workflowName: "gate" });
-    await store.addApproval(run.id, { id: "approval-1", requestedAction: "comment", evidence: [], state: "pending" });
+    await store.addApproval(run.id, { id: "approval-1", requestedAction: "comment", evidence: ["report-1"], state: "pending" });
 
-    expect(await approvalsCommand(["approve", run.id, "approval-1"], store)).toContain("\"approved\"");
+    const pending = JSON.parse(await approvalsCommand(["list"], store)) as Array<{ approvalId: string; evidence: string[] }>;
+    expect(pending).toEqual([
+      expect.objectContaining({ approvalId: "approval-1", evidence: ["report-1"] })
+    ]);
+    expect(await boardCommand(store)).toContain("pending:approval-1:comment evidence=report-1");
+
+    const approved = JSON.parse(await approvalsCommand(["approve", run.id, "approval-1"], store)) as { runState: string; approval: { state: string } };
+    expect(approved.runState).toBe("completed");
+    expect(approved.approval.state).toBe("approved");
+    expect(await boardCommand(store)).toContain("approved:approval-1:comment evidence=report-1");
+
+    const rejectedRun = await store.createRun({ workflowName: "gate" });
+    await store.addApproval(rejectedRun.id, { id: "approval-2", requestedAction: "close-pr", evidence: ["report-2"], state: "pending" });
+    const rejected = JSON.parse(await approvalsCommand(["reject", rejectedRun.id, "approval-2"], store)) as { runState: string; approval: { state: string } };
+    expect(rejected.runState).toBe("cancelled");
+    expect(rejected.approval.state).toBe("rejected");
+    expect(await boardCommand(store)).toContain("rejected:approval-2:close-pr evidence=report-2");
   });
 });

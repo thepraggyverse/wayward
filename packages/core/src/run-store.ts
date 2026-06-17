@@ -129,7 +129,8 @@ export class FileRunStore {
       run.state = "needs_approval";
       run.updatedAt = new Date().toISOString();
       await this.writeSummary(run);
-      await this.appendEvent(runId, createEvent(runId, "approval.requested", { approvalId: approval.id, action: approval.requestedAction }));
+      await this.appendEvent(runId, createEvent(runId, "approval.requested", { approvalId: approval.id, action: approval.requestedAction, evidence: approval.evidence }));
+      await this.appendEvent(runId, createEvent(runId, "run.state_changed", { state: "needs_approval", approvalId: approval.id }));
     });
   }
 
@@ -138,12 +139,15 @@ export class FileRunStore {
       const run = await this.getRun(runId);
       const approval = run.approvals.find((candidate) => candidate.id === approvalId);
       if (!approval) throw new Error(`Unknown approval ${approvalId}`);
+      if (approval.state !== "pending") throw new Error(`Approval ${approvalId} has already been ${approval.state}`);
       approval.state = state;
       approval.actor = actor;
       approval.decidedAt = new Date().toISOString();
+      run.state = state === "approved" ? "completed" : "cancelled";
       run.updatedAt = new Date().toISOString();
       await this.writeSummary(run);
-      await this.appendEvent(runId, createEvent(runId, "approval.decided", { approvalId, state, actor }));
+      await this.appendEvent(runId, createEvent(runId, "approval.decided", { approvalId, state, actor, evidence: approval.evidence }));
+      await this.appendEvent(runId, createEvent(runId, "run.state_changed", { state: run.state, approvalId, decision: state }));
       return approval;
     });
   }
