@@ -136,6 +136,63 @@ class FakeGhRunner implements GhRunner {
   }
 }
 
+class FakeLimitGhRunner implements GhRunner {
+  readonly calls: Array<{ args: string[]; cwd: string }> = [];
+  constructor(private readonly totalOpenPrs: number) {}
+
+  async run(args: string[], options: { cwd: string }) {
+    this.calls.push({ args, cwd: options.cwd });
+    if (args.join(" ").startsWith("pr list ")) {
+      const limit = readArgNumber(args, "--limit") ?? 100;
+      return {
+        code: 0,
+        stdout: JSON.stringify(Array.from({ length: Math.min(this.totalOpenPrs, limit) }, (_, index) => ({
+          number: index + 1,
+          title: `PR ${index + 1}`,
+          author: { login: "author" },
+          headRefName: `branch-${index + 1}`,
+          baseRefName: "main",
+          isDraft: false,
+          updatedAt: "2026-06-17T00:00:00Z"
+        }))),
+        stderr: ""
+      };
+    }
+    const viewMatch = args.join(" ").match(/^pr view (\d+) --json /);
+    if (viewMatch) {
+      const number = Number(viewMatch[1]);
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          number,
+          title: `PR ${number}`,
+          author: { login: "author" },
+          headRefName: `branch-${number}`,
+          baseRefName: "main",
+          isDraft: false,
+          mergeStateStatus: "CLEAN",
+          updatedAt: "2026-06-17T00:00:00Z",
+          reviewDecision: "APPROVED",
+          latestReviews: [{ author: { login: "reviewer" }, state: "APPROVED", submittedAt: "2026-06-17T01:00:00Z" }],
+          statusCheckRollup: [{ name: "test", status: "COMPLETED", conclusion: "SUCCESS" }]
+        }),
+        stderr: ""
+      };
+    }
+    if (/^pr diff \d+ --name-only$/.test(args.join(" "))) return { code: 0, stdout: "", stderr: "" };
+    return { code: 1, stdout: "", stderr: `unexpected gh call: ${args.join(" ")}` };
+  }
+}
+
+function readArgNumber(args: string[], flag: string): number | undefined {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function tournamentFakes(root: string, states: Record<string, JobState> = {}) {
   const worktrees = new FakeTournamentWorktrees(root);
   let adapter: FakeTournamentAdapter | undefined;
@@ -264,12 +321,66 @@ describe("built-in workflows", () => {
     expect(report).toContain("PR #7 mergeability is DIRTY");
     expect(report).toContain("PR #8 has no checks reported");
     expect(report).toContain("PR #8 is still draft");
+    expect(report).not.toContain("gh pr list limit of 100");
+
+    const normalized = run.artifacts.find((artifact) => artifact.id === "open-pr-audit-normalized");
+    const normalizedJson = JSON.parse(await readFile(normalized!.path, "utf8")) as { listLimit: number; listMayBeTruncated: boolean; listWarning?: string };
+    expect(normalizedJson).toMatchObject({ listLimit: 100, listMayBeTruncated: false });
+    expect(normalizedJson.listWarning).toBeUndefined();
 
     const events = await store.readEvents(result.runId);
     expect(events.find((event) => event.type === "approval.requested")?.payload).toMatchObject({
       approvalId: run.approvals[0]?.id,
       evidence: [run.reports[0]?.id]
     });
+  });
+
+  it("warns when open-pr-audit returns exactly the first 100 PRs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-packs-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const ghRunner = new FakeLimitGhRunner(100);
+    const result = await new WorkflowRuntime(store).run(createOpenPrAuditWorkflow({
+      ghRunner,
+      now: () => new Date("2026-06-18T00:00:00Z")
+    }), { repo: dir });
+    const run = await store.getRun(result.runId);
+    const report = await readFile(run.reports[0]!.path, "utf8");
+    const normalized = run.artifacts.find((artifact) => artifact.id === "open-pr-audit-normalized");
+    const normalizedJson = JSON.parse(await readFile(normalized!.path, "utf8")) as { listLimit: number; listMayBeTruncated: boolean; listWarning: string };
+
+    expect(run.state).toBe("needs_approval");
+    expect(ghRunner.calls[0]?.args).toEqual(["pr", "list", "--state", "open", "--json", expect.any(String), "--limit", "100"]);
+    expect(report).toContain("The audit reached the gh pr list limit of 100");
+    expect(report).toContain("Open PR audit reached first 100 PRs");
+    expect(normalizedJson).toMatchObject({
+      listLimit: 100,
+      listMayBeTruncated: true,
+      listWarning: "The audit reached the gh pr list limit of 100; additional open PRs may exist beyond this audit window."
+    });
+  });
+
+  it("surfaces the first-100 warning when more open PRs are available than gh pr list returns", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wayward-packs-"));
+    tempDirs.push(dir);
+    const store = new FileRunStore(join(dir, "runs"));
+    const ghRunner = new FakeLimitGhRunner(101);
+    const result = await new WorkflowRuntime(store).run(createOpenPrAuditWorkflow({
+      ghRunner,
+      now: () => new Date("2026-06-18T00:00:00Z")
+    }), { repo: dir });
+    const run = await store.getRun(result.runId);
+    const report = await readFile(run.reports[0]!.path, "utf8");
+    const synthesis = run.artifacts.find((artifact) => artifact.id === "open-pr-audit-synthesis");
+    const synthesisJson = JSON.parse(await readFile(synthesis!.path, "utf8")) as { listMayBeTruncated: boolean; listWarning: string; findings: Array<{ title: string }> };
+
+    expect(run.state).toBe("needs_approval");
+    expect(report).toContain("additional open PRs may exist beyond this audit window");
+    expect(synthesisJson).toMatchObject({
+      listMayBeTruncated: true,
+      listWarning: "The audit reached the gh pr list limit of 100; additional open PRs may exist beyond this audit window."
+    });
+    expect(synthesisJson.findings.map((finding) => finding.title)).toContain("Open PR audit reached first 100 PRs");
   });
 
   it("tournament creates the requested number of isolated worktrees and records them in the run summary", async () => {

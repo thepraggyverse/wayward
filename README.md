@@ -53,6 +53,8 @@ pnpm --filter @thepraggyverse/cli wayward run open-pr-audit --repo .
 pnpm --filter @thepraggyverse/cli wayward approvals list
 ```
 
+If the audit reaches the current `gh pr list --limit 100` window, the normalized artifact and final report warn that additional open PRs may exist beyond the audited set.
+
 `tournament` creates isolated worktree attempts, asks Codex-backed workers to solve the same task, validates the candidates, and writes a ranked report.
 
 ```bash
@@ -165,6 +167,7 @@ The workspace is currently source-first. Package publication and stable third-pa
 - Built-in workflows do not automatically execute post-approval external mutations.
 - `security-review` is currently routed through `ultrareview`.
 - `open-pr-audit` requires an authenticated `gh` CLI with repository read access.
+- `open-pr-audit` audits the first 100 open PRs through `gh pr list` and surfaces a warning when that window is full.
 - Workflows depend on local tool availability and may fail if Codex, `gh`, or Git are unavailable.
 
 ## Roadmap

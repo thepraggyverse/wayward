@@ -42,6 +42,7 @@ Current boundaries:
 
 - Requires an authenticated `gh` CLI with repository read access.
 - Uses read-only GitHub commands.
+- Lists up to the first 100 open PRs and emits a report warning when that limit is reached, because more open PRs may exist beyond the audit window.
 - Writes raw and normalized PR audit artifacts under `.wayward/runs/<run-id>/`.
 - Does not post comments, close PRs, merge, push, or mutate GitHub automatically.
 - Records the approval decision locally. There is not yet an automatic post-approval external action executor.
